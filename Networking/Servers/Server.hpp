@@ -57,7 +57,7 @@ namespace HDE {
     std::string get_current_time();
     void clean_server_shutdown(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue);
     inline void reportErrorMessage();
-    bool is_rate_limited(const std::string& client_ip);
+    bool is_rate_limited(const std::string_view client_ip);
 
     //OS Internals
     alignas(CACHE_LINE_SIZE) inline const size_t NUM_THREADS = std::thread::hardware_concurrency();
