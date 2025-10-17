@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>C++ HTTP Server</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding: 20px;
+            }
+
+            .container {
+                background: white;
+                border-radius: 20px;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                max-width: 800px;
+                width: 100%;
+                padding: 40px;
+                animation: fadeIn 0.6s ease-in;
+            }
+
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(-20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .header {
+                text-align: center;
+                margin-bottom: 40px;
+            }
+
+            .header h1 {
+                color: #333;
+                font-size: 2.5em;
+                margin-bottom: 10px;
+            }
+
+            .header .subtitle {
+                color: #666;
+                font-size: 1.1em;
+            }
+
+            .status-badge {
+                display: inline-block;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 8px 20px;
+                border-radius: 25px;
+                font-weight: bold;
+                margin-top: 15px;
+                animation: pulse 2s infinite;
+            }
+
+            @keyframes pulse {
+                0%, 100% {
+                    transform: scale(1);
+                }
+                50% {
+                    transform: scale(1.05);
+                }
+            }
+
+            .info-section {
+                background: #f8f9fa;
+                border-radius: 10px;
+                padding: 25px;
+                margin-bottom: 25px;
+            }
+
+            .info-section h2 {
+                color: #667eea;
+                font-size: 1.5em;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+            }
+
+            .info-section h2::before {
+                content: "⚡";
+                margin-right: 10px;
+                font-size: 1.2em;
+            }
+
+            .info-list {
+                list-style: none;
+            }
+
+            .info-list li {
+                padding: 12px 0;
+                border-bottom: 1px solid #e0e0e0;
+                color: #555;
+                display: flex;
+                justify-content: space-between;
+            }
+
+            .info-list li:last-child {
+                border-bottom: none;
+            }
+
+            .info-list .label {
+                font-weight: 600;
+                color: #333;
+            }
+
+            .info-list .value {
+                color: #667eea;
+                font-family: 'Courier New', monospace;
+            }
+
+            .features {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 20px;
+                margin-top: 30px;
+            }
+
+            .feature-card {
+                background: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 10px;
+                padding: 20px;
+                text-align: center;
+                transition: all 0.3s ease;
+            }
+
+            .feature-card:hover {
+                transform: translateY(-5px);
+                border-color: #667eea;
+                box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+            }
+
+            .feature-card .icon {
+                font-size: 2.5em;
+                margin-bottom: 10px;
+            }
+
+            .feature-card h3 {
+                color: #333;
+                margin-bottom: 8px;
+                font-size: 1.1em;
+            }
+
+            .feature-card p {
+                color: #666;
+                font-size: 0.9em;
+            }
+
+            .footer {
+                text-align: center;
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 2px solid #e0e0e0;
+                color: #999;
+            }
+
+            .footer a {
+                color: #667eea;
+                text-decoration: none;
+                font-weight: 600;
+            }
+
+            .footer a:hover {
+                text-decoration: underline;
+            }
+
+            @media (max-width: 600px) {
+                .container {
+                    padding: 25px;
+                }
+
+                .header h1 {
+                    font-size: 2em;
+                }
+
+                .features {
+                    grid-template-columns: 1fr;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🚀 C++ HTTP Server</h1>
+                <p class="subtitle">High-Performance Multithreaded Server</p>
+                <span class="status-badge">✓ Server Online</span>
+            </div>
+
+            <div class="info-section">
+                <h2>Server Information</h2>
+                <ul class="info-list">
+                    <li>
+                        <span class="label">Status:</span>
+                        <span class="value">Running</span>
+                    </li>
+                    <li>
+                        <span class="label">Language:</span>
+                        <span class="value">C++23</span>
+                    </li>
+                    <li>
+                        <span class="label">Protocol:</span>
+                        <span class="value">HTTP/1.1</span>
+                    </li>
+                    <li>
+                        <span class="label">Architecture:</span>
+                        <span class="value">Multithreaded</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="info-section">
+                <h2>Features</h2>
+                <div class="features">
+                    <div class="feature-card">
+                        <div class="icon">⚡</div>
+                        <h3>High Performance</h3>
+                        <p>Optimized for speed with C++23</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="icon">🔒</div>
+                        <h3>Rate Limiting</h3>
+                        <p>DoS protection built-in</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="icon">🧵</div>
+                        <h3>Concurrent</h3>
+                        <p>Multi-threaded request handling</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="icon">📊</div>
+                        <h3>Scalable</h3>
+                        <p>Handles multiple connections</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p>Built with ❤️ using C++ | <a href="https://github.com">View on GitHub</a></p>
+            </div>
+        </div>
+    </body>
+</html>
