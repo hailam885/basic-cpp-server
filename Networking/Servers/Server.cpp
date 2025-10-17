@@ -346,10 +346,10 @@ void HDE::clean_server_shutdown(HDE::AddressQueue& address_queue, HDE::Responder
     addr_in_addr_queue.notify_all();
 }
 //Now finnally Thread-safe, uses rate_limited_mutex.
-bool HDE::is_rate_limited(const std::string& client_ip) {
+bool HDE::is_rate_limited(const std::string_view client_ip) {
     std::lock_guard<std::mutex> lock(rate_limited_mutex);
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-    std::list<std::chrono::steady_clock::time_point>& times = HDE::connection_history[client_ip];
+    std::deque<std::chrono::steady_clock::time_point>& times = HDE::connection_history[client_ip];
     times.remove_if([&now](const std::chrono::steady_clock::time_point& tp) {
         return now - tp > std::chrono::seconds(1);
     });
