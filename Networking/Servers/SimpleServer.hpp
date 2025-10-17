@@ -30,11 +30,10 @@
 #include <pthread.h>
 #include <sched.h>
 #include <string_view>
+#include <span>
+//#include <numa.h>
+//#include <boost/lockfree/queue.hpp>
 
-#define CACHE_LINE_SIZE (128)
-#define int_size sizeof(int)
-#define chrono_seconds_size sizeof(std::chrono::seconds)
-#define bool_size sizeof(bool)
 //to use alignas() specifier
 constexpr int returnNextBiggestPowerOfTwo(const int& num) {
     int res = 1;
@@ -81,7 +80,7 @@ namespace HDE {
         private:
             std::queue<struct Request> address_queue;
         public:
-            void emplace_response(int loc, const char* data, size_t len);
+            void emplace_response(int loc, std::span<const char> data);
             struct Request get_response();
             int get_size() const noexcept;
             void closeAllConnections();
@@ -92,8 +91,8 @@ namespace HDE {
             std::queue<struct Response> allResponses;
         public:
             struct Response get_response() noexcept;
-            void emplace_response(int loc, const char* msg, size_t len) noexcept;
-            void emplace_repsonse(int destination, std::string msg);
+            void emplace_response(int loc, std::span<const char> data) noexcept;
+            void emplace_response(int destination, std::string msg);
             int get_size() const noexcept;
             void closeAllConnections();
             bool empty() const noexcept;

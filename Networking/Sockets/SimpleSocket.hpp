@@ -6,6 +6,8 @@
 #include <netinet/in.h>
 #include <iostream>
 
+#define CACHE_LINE_SIZE (128)
+
 //use AF_INET6 for IPv6, AF_INET for IPv4
 
 namespace HDE {
@@ -22,8 +24,8 @@ namespace HDE {
             struct sockaddr_in get_address();
             int get_sock();
         private:
-            struct sockaddr_in address;
-            int sock;
+            alignas(CACHE_LINE_SIZE) struct sockaddr_in address;
+            alignas(CACHE_LINE_SIZE) int sock;
     };
 }
 

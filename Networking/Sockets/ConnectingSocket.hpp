@@ -13,7 +13,7 @@ namespace HDE {
             //Virtual function from parent
             void connect_to_network(int sock, struct sockaddr_in address);
         private:
-            int binding;
+            alignas(CACHE_LINE_SIZE) int binding;
     };
 }
 

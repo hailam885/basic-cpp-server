@@ -4,27 +4,17 @@
 #include "SimpleServer.hpp"
 
 struct Request;
-
 struct Response;
 
-const constexpr int request_cache_size_line = (sizeof(Request) + (sizeof(Request) % CACHE_LINE_SIZE));
-const constexpr int response_cache_size_line = (sizeof(Response) + (sizeof(Response) % CACHE_LINE_SIZE));
-
-#define REQUEST_CACHE_SIZE request_cache_size_line
-#define RESPONSE_CACHE_SIZE response_cache_size_line
-
-using TimePoint = std::chrono::steady_clock::time_point;
-using Clock = std::chrono::steady_clock;
-
 //Mutex objects for multithreading synchronization
-extern std::mutex address_queue_mutex;
-extern std::mutex responder_queue_mutex;
-extern std::mutex r_e_m_mutex;
-extern std::mutex console_mutex;
-extern std::mutex clean_up_mutex;
-extern std::mutex general_mutex;
-extern std::mutex file_access_mutex;
-extern std::mutex rate_limited_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex address_queue_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex responder_queue_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex r_e_m_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex console_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex clean_up_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex general_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex file_access_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex rate_limited_mutex;
 
 namespace HDE {
     //Server configurations
@@ -40,7 +30,7 @@ namespace HDE {
     alignas(CACHE_LINE_SIZE) inline int threadsForAccepter = 2;
     alignas(CACHE_LINE_SIZE) inline int threadsForHandler = 3;
     alignas(CACHE_LINE_SIZE) inline int threadsForResponder = 2;
-    alignas(CACHE_LINE_SIZE) inline int totalUsedThreads = threadsForAccepter + threadsForHandler + threadsForResponder;
+    alignas(CACHE_LINE_SIZE) consteval int totalUsedThreads = threadsForAccepter + threadsForHandler + threadsForResponder;
 
     //configures whether to limit the responder function from checking too much, if yes, by default it waits for 10ms before checking, and automatically disables it when the queue size is too big.
     alignas(CACHE_LINE_SIZE) constexpr bool continuous_responses = true;
@@ -61,7 +51,7 @@ namespace HDE {
     alignas(CACHE_LINE_SIZE) constexpr size_t MAX_BUFFER_SIZE = 30721;
 
     //incoming connections list tracker
-    extern std::unordered_map<std::string, std::list<TimePoint>> connection_history;
+    extern std::unordered_map<std::string, std::list<std::chrono::steady_clock::time_point>> connection_history;
 
     //Utility functions
     std::string get_current_time();
@@ -80,6 +70,7 @@ namespace HDE {
             int new_socket;
             std::string html_file_path = "/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html_templates/random.html";
             std::string main_page_template_cache;
+            size_t main_page_template_cache_size;
             void load_cache();
         public:
             Server();

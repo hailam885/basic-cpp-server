@@ -13,8 +13,8 @@ namespace HDE {
             int get_listening();
             int get_backlog();
         private:
-            int backlog;
-            int listening;
+            alignas(CACHE_LINE_SIZE) int backlog;
+            alignas(CACHE_LINE_SIZE) int listening;
     };
 }
 

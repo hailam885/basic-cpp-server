@@ -13,7 +13,7 @@ namespace HDE {
             int get_binding();
         private:
             void connect_to_network(int sock, struct sockaddr_in address);
-            int binding;
+            alignas(CACHE_LINE_SIZE) int binding;
     };
 }
 
