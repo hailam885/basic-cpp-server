@@ -81,6 +81,7 @@ namespace HDE {
             std::queue<struct Request> address_queue;
         public:
             void emplace_response(int loc, std::span<const char> data);
+            void emplace_response(const int location, const std::string_view msg);
             struct Request get_response();
             int get_size() const noexcept;
             void closeAllConnections();
@@ -92,7 +93,7 @@ namespace HDE {
         public:
             struct Response get_response() noexcept;
             void emplace_response(int loc, std::span<const char> data) noexcept;
-            void emplace_response(int destination, std::string msg);
+            void emplace_response(const int destination, const std::string_view msg);
             int get_size() const noexcept;
             void closeAllConnections();
             bool empty() const noexcept;
