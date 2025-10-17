@@ -141,6 +141,16 @@ void HDE::AddressQueue::emplace_response(int loc, std::span<const char> data) {
     }
 }
 //NOT Thread-safe, need to acquire address_queue_mutex before execution
+//LOCK console_mutex BEFORE calling function
+void HDE::AddressQueue::emplace_response(const int location, const std::string_view msg) {
+    if (address_queue.size() < HDE::max_incoming_address_queue_size) [[likely]] {
+        address_queuel.emplace(location, msg);
+        addr_in_addr_queue.notify_one();
+    } else [[unlikely]] {
+        std::cout << std::format("[Thread {}]: [{}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.\n", std::this_thread::get_id(), HDE::get_current_time(), std::to_string(HDE::max_incoming_address_queue_size));
+    }
+}
+//NOT Thread-safe, need to acquire address_queue_mutex before execution
 //VS Code might tell you there's an error here, but trust me there's none, just left-click and hover over the variable and it is gone.
 struct Request HDE::AddressQueue::get_response() {
     if (!address_queue.empty()) [[likely]] {
@@ -217,9 +227,9 @@ void HDE::ResponderQueue::emplace_response(int loc, std::span<const char> data) 
 }
 //NOT Thread-safe, need to acquire responder_queue_mutex
 //Optimize the passing of parameter msg.
-void HDE::ResponderQueue::emplace_response(int destination, std::string msg) {
+void HDE::ResponderQueue::emplace_response(const int destination, const std::string_view msg) {
     if (allResponses.size() <= HDE::max_responses_queue_size) [[likely]] {
-        allResponses.emplace(destination, std::move(msg));
+        allResponses.emplace(destination, msg);
         resp_in_res_queue.notify_one();
     } else [[unlikely]] {
         std::cout << std::format("[Thread {}]: [{}]: Rejecting client due to max_responses_queue_size overflow; Overflow limit: {} clients.\n", std::this_thread::get_id(), HDE::get_current_time(), std::to_string(HDE::max_responses_queue_size));
