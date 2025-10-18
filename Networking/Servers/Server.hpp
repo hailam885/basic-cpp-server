@@ -63,8 +63,8 @@ namespace HDE {
     alignas(CACHE_LINE_SIZE) constexpr int Port = 80;
     alignas(CACHE_LINE_SIZE) constexpr int MAX_CONNECTIONS_PER_SECOND = 20;
     //For after a connection is established and waiting for the next step
-    alignas(CACHE_LINE_SIZE) constexpr int max_incoming_address_queue_size = 5000000;
-    alignas(CACHE_LINE_SIZE) constexpr int max_responses_queue_size = 5000000;
+    alignas(CACHE_LINE_SIZE) constexpr int max_incoming_address_queue_size = 50000;
+    alignas(CACHE_LINE_SIZE) constexpr int max_responses_queue_size = 50000;
 
     //Multithreading configurations, multithreading enabled by default
     //It is recommended to have the handler's thread count more than the accepter's and responder's thread count.
@@ -97,7 +97,7 @@ namespace HDE {
 
     //logging configurations
     //0 -> minimal logs, 1 -> reduced logs, 2 -> default logs, 3 -> full (normal + debugging) logs
-    constexpr inline int log_level = 2;
+    constexpr inline int log_level = 3;
 
     //Utility functions
     inline std::string_view get_current_time();

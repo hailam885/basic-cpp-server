@@ -38,9 +38,16 @@
 #include <quill/Logger.h>
 #include "quill/sinks/ConsoleSink.h"
 #include "quill/std/WideString.h"
+#include <sys/time.h>
 #include <unistd.h>
 //#include <numa.h>
 //#include <boost/lockfree/queue.hpp>
+
+#ifdef __APPLE__
+    #include <sys/event.h>
+#elif __linux__
+    #include <sys/epoll.h>
+#endif
 
 //to use alignas() specifier
 constexpr int returnNextBiggestPowerOfTwo(const int& num) {
