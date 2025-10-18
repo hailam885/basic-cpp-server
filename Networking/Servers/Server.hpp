@@ -42,6 +42,8 @@ inline RateLimitShard rate_limit_shards[NUM_RATE_LIMIT_SHARDS];
 //Mutex objects for multithreading synchronization
 alignas(CACHE_LINE_SIZE) extern std::mutex address_queue_mutex;
 alignas(CACHE_LINE_SIZE) extern std::mutex responder_queue_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex address_cv_mutex;
+alignas(CACHE_LINE_SIZE) extern std::mutex response_cv_mutex;
 alignas(CACHE_LINE_SIZE) extern std::mutex r_e_m_mutex;
 alignas(CACHE_LINE_SIZE) extern std::mutex init_mutex;
 alignas(CACHE_LINE_SIZE) extern std::mutex clean_up_mutex;
@@ -61,7 +63,7 @@ namespace HDE {
     //Server configurations
     alignas(CACHE_LINE_SIZE) constexpr int queueCount = 10000000;
     alignas(CACHE_LINE_SIZE) constexpr int Port = 80;
-    alignas(CACHE_LINE_SIZE) constexpr int MAX_CONNECTIONS_PER_SECOND = 20;
+    alignas(CACHE_LINE_SIZE) constexpr int MAX_CONNECTIONS_PER_SECOND = 40;
     //For after a connection is established and waiting for the next step
     alignas(CACHE_LINE_SIZE) constexpr int max_incoming_address_queue_size = 50000;
     alignas(CACHE_LINE_SIZE) constexpr int max_responses_queue_size = 50000;
@@ -87,7 +89,7 @@ namespace HDE {
     //0 -> disabled, 1 -> limit by queue size, 2 -> limit by time
     //right now the wait_before_notify_thread is default to 0, changing it doesn't change anything.
     alignas(CACHE_LINE_SIZE) constexpr int wait_before_notify_thread = 0;
-    alignas(CACHE_LINE_SIZE) constexpr int queue_size_limit_before_notify = 20;
+    //alignas(CACHE_LINE_SIZE) constexpr int queue_size_limit_before_notify = 20;
 
     //Define the maximum limit in bytes a client's request can have; recommended to have 30000+.
     alignas(CACHE_LINE_SIZE) constexpr size_t MAX_BUFFER_SIZE = 30721;
@@ -97,7 +99,7 @@ namespace HDE {
 
     //logging configurations
     //0 -> minimal logs, 1 -> reduced logs, 2 -> default logs, 3 -> full (normal + debugging) logs
-    constexpr inline int log_level = 3;
+    constexpr inline int log_level = 0;
 
     //Utility functions
     inline std::string_view get_current_time();
@@ -114,7 +116,7 @@ namespace HDE {
             void responder(HDE::ResponderQueue& response, quill::Logger* logger) override;
             char buffer[MAX_BUFFER_SIZE] = {0};
             int new_socket;
-            std::string html_file_path = "/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html_templates/random.html";
+            std::string html_file_path = "/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html_templates/index.html";
             std::string main_page_template_cache;
             size_t main_page_template_cache_size;
             void load_cache(quill::Logger* logger);

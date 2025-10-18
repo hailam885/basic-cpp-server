@@ -108,6 +108,7 @@ namespace HDE {
         public:
             struct Response get_response() noexcept;
             void emplace_response(const int destination, const std::string_view msg, quill::Logger* logger);
+            //void emplace_response(const int destination, const std::span<const char> data, quill::Logger* logger);
             int get_size() const noexcept;
             void closeAllConnections();
             bool empty() const noexcept;
