@@ -1,6 +1,11 @@
 #include "Server.hpp"
+
 int main() {
-    HDE::Server obj;
+    quill::Backend::start();
+    auto console_sink = quill::Frontend::create_or_get_sink<quill::ConsoleSink>("sink_id_1");
+    quill::Logger* logger = quill::Frontend::create_or_get_logger("root", std::move(console_sink));
+    logger->set_log_level(quill::LogLevel::TraceL3);
+    HDE::Server obj = HDE::Server(logger);
 }
 /* Commands list:
 
@@ -36,7 +41,7 @@ Compiling w/ Profile-Guided w/ -03 argument:
 
 ./a/Networking/Servers/main
 
-ab -n 1000000 -c 100000 http://192.168.12.109:80/
+ab -n 10000000 -c 100000 http://192.168.12.109:80/
 
 /usr/bin/clang++ -std=gnu++14 -Wpedantic -ferror-limit=0 -std=c++23 -O3 -fcolor-diagnostics -fansi-escape-codes -g -fprofile-use /Users/trangtran/Desktop/coding_files/a/Networking/Servers/main.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Servers/Server.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Servers/SimpleServer.cpp /Users/trangtran/Desktop/coding_files/a/Networking/hdelibc-networking.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/BindingSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/ConnectingSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/hdelibc-sockets.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/ListeningSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/SimpleSocket.cpp -o /Users/trangtran/Desktop/coding_files/a/Networking/Servers/main_pgo
 
