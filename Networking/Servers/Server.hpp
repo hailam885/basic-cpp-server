@@ -28,6 +28,16 @@ struct RateLimiter {
         return recent;
     }
 };
+//For Sharded Lock
+constexpr size_t NUM_RATE_LIMIT_SHARDS = 16;
+
+struct RateLimitShard {
+    alignas(CACHE_LINE_SIZE) std::mutex mutex;
+    std::unordered_map<std::string, RateLimiter> limiters;
+    char padding[CACHE_LINE_SIZE - sizeof(std::mutex) - sizeof(std::unordered_map<std::string, RateLimiter>)];
+};
+
+inline RateLimitShard rate_limit_shards[NUM_RATE_LIMIT_SHARDS];
 
 //Mutex objects for multithreading synchronization
 alignas(CACHE_LINE_SIZE) extern std::mutex address_queue_mutex;
@@ -38,6 +48,14 @@ alignas(CACHE_LINE_SIZE) extern std::mutex clean_up_mutex;
 alignas(CACHE_LINE_SIZE) extern std::mutex general_mutex;
 alignas(CACHE_LINE_SIZE) extern std::mutex file_access_mutex;
 alignas(CACHE_LINE_SIZE) extern std::mutex rate_limited_mutex;
+
+struct alignas(CACHE_LINE_SIZE) serverStatus {
+    std::atomic<bool> finished_initialization;
+    std::atomic<bool> stop_server = false;
+    char padding[CACHE_LINE_SIZE - 2 * sizeof(std::atomic<bool>)];
+};
+
+inline serverStatus serverState;
 
 namespace HDE {
     //Server configurations
@@ -50,10 +68,11 @@ namespace HDE {
 
     //Multithreading configurations, multithreading enabled by default
     //It is recommended to have the handler's thread count more than the accepter's and responder's thread count.
+    //For now changing the thread count is not available.
     alignas(CACHE_LINE_SIZE) inline int threadsForAccepter = 2;
     alignas(CACHE_LINE_SIZE) inline int threadsForHandler = 3;
     alignas(CACHE_LINE_SIZE) inline int threadsForResponder = 2;
-    alignas(CACHE_LINE_SIZE) consteval int totalUsedThreads = threadsForAccepter + threadsForHandler + threadsForResponder;
+    alignas(CACHE_LINE_SIZE) inline int totalUsedThreads = threadsForAccepter + threadsForHandler + threadsForResponder;
 
     //configures whether to limit the responder function from checking too much, if yes, by default it waits for 10ms before checking, and automatically disables it when the queue size is too big.
     alignas(CACHE_LINE_SIZE) constexpr bool continuous_responses = true;
@@ -77,11 +96,11 @@ namespace HDE {
     extern std::unordered_map<std::string, RateLimiter> connection_history;
 
     //logging configurations
-    //0 -> no logs, 1 -> minimal logs, 2 -> default logs, 3 -> full (normal + debugging) logs
-    constexpr int log_level = 2;
+    //0 -> minimal logs, 1 -> reduced logs, 2 -> default logs, 3 -> full (normal + debugging) logs
+    constexpr inline int log_level = 2;
 
     //Utility functions
-    std::string get_current_time();
+    inline std::string_view get_current_time();
     void clean_server_shutdown(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue);
     inline void reportErrorMessage(quill::Logger* logger);
     bool is_rate_limited(const std::string_view client_ip);
