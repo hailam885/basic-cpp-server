@@ -2,6 +2,7 @@
 #define SimpleServer_hpp
 
 #include "../hdelibc-networking.hpp"
+#include <algorithm>
 #include <arpa/inet.h>
 #include <array>
 #include <atomic>
@@ -15,39 +16,48 @@
 #include <fstream>
 #include <functional>
 #include <format>
-#include <netinet/in.h>
-#include <string>
-#include <unordered_map>
-#include <list>
-#include <netdb.h>
-#include <thread>
-#include <mutex>
-#include <queue>
-#include <stdexcept>
 #include <iostream>
+#include <list>
+#include <mutex>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <thread>
-#include <stdio.h>
 #include <pthread.h>
-#include <sched.h>
-#include <string_view>
-#include <span>
-#include <utility>
+#include <queue>
 #include <quill/Backend.h>
 #include <quill/Frontend.h>
 #include <quill/LogMacros.h>
 #include <quill/Logger.h>
 #include "quill/sinks/ConsoleSink.h"
 #include "quill/std/WideString.h"
+#include <regex>
+#include <stdexcept>
+#include <stdio.h>
+#include <span>
+#include <string>
+#include <string_view>
 #include <sys/time.h>
 #include <unistd.h>
+#include <unordered_map>
+#include <utility>
 //#include <numa.h>
 //#include <boost/lockfree/queue.hpp>
 
+//for cpu core pinning
+#ifdef __linux
+    #include <sched.h>
+#elif __APPLE__
+    //Don't uncomment
+    //#include <mach/thread_policy.h>
+    //#include <mach/thread_act.h>
+#endif
+
+/*
 #ifdef __APPLE__
     #include <sys/event.h>
 #elif __linux__
     #include <sys/epoll.h>
-#endif
+#endif*/
 
 //to use alignas() specifier
 constexpr int returnNextBiggestPowerOfTwo(const int& num) {

@@ -4,7 +4,7 @@ int main() {
     quill::Backend::start();
     auto console_sink = quill::Frontend::create_or_get_sink<quill::ConsoleSink>("sink_id_1");
     quill::Logger* logger = quill::Frontend::create_or_get_logger("root", std::move(console_sink));
-    logger->set_log_level(quill::LogLevel::TraceL3);
+    logger -> set_log_level(quill::LogLevel::TraceL3);
     HDE::Server obj = HDE::Server(logger);
 }
 /* Commands list:
