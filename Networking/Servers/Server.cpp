@@ -50,22 +50,9 @@ if () [[likely/unlikely]] {
 */
 
 //in the future, if possible create a struct for each of these mutexes/conditional variables and add padding; but only do it for frequently-accessed ones.
-
 alignas(CACHE_LINE_SIZE) socklen_t addrlen = sizeof(struct sockaddr_in);
-//this is the samething as sizeof(buffer), which probabyl evaluates to HDE::MAX_BUFFER_SIZE anyway.
-alignas(CACHE_LINE_SIZE) constexpr size_t buf_size = HDE::MAX_BUFFER_SIZE;
 
 //definitions
-alignas(CACHE_LINE_SIZE) std::mutex address_queue_mutex;
-alignas(CACHE_LINE_SIZE) std::mutex responder_queue_mutex;
-alignas(CACHE_LINE_SIZE) std::mutex address_cv_mutex;
-alignas(CACHE_LINE_SIZE) std::mutex response_cv_mutex;
-alignas(CACHE_LINE_SIZE) std::mutex r_e_m_mutex;
-alignas(CACHE_LINE_SIZE) std::mutex clean_up_mutex;
-alignas(CACHE_LINE_SIZE) std::mutex init_mutex;
-alignas(CACHE_LINE_SIZE) std::mutex general_mutex;
-alignas(CACHE_LINE_SIZE) std::mutex file_access_mutex; //to account for fstream's thread-risky nature
-alignas(CACHE_LINE_SIZE) std::mutex rate_limited_mutex;
 alignas(CACHE_LINE_SIZE) std::condition_variable finish_initialization;
 alignas(CACHE_LINE_SIZE) std::condition_variable addr_in_addr_queue;
 alignas(CACHE_LINE_SIZE) std::condition_variable resp_in_res_queue;
@@ -102,9 +89,9 @@ inline std::string_view HDE::get_current_time() {
 }
 //Thread safe
 inline void HDE::Server::logClientInfo(const std::string_view processing_component, const std::string_view message, quill::Logger* logger) const {
-    if (!message.empty() && static_cast<int>(HDE::log_level) >= 2) [[likely]] {
+    if (!message.empty() && HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) [[likely]] {
         LOG_INFO(logger, "[Thread {}]: [{}] logClientInfo(): {}", get_thread_id_cached(), processing_component, message);
-    } else if (static_cast<int>(HDE::log_level) >= 2) [[unlikely]] {
+    } else if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) [[unlikely]] {
         LOG_INFO(logger, "[Thread {}]: [{}] logClientInfo(): <empty>", get_thread_id_cached(), processing_component);
     } else {
         return;
@@ -113,14 +100,14 @@ inline void HDE::Server::logClientInfo(const std::string_view processing_compone
 //Thread-safe, only prints if static_cast<int>(HDE::log_level) is set to anything higher than 0.
 inline void HDE::reportErrorMessage(quill::Logger* logger) {
     int error_code = errno;
-    if (static_cast<int>(HDE::log_level) >= 1) {
+    if (HDE::server_config.log_level != MINIMAL) {
         LOG_INFO(logger, "[Thread {}]: An error has occured (Description, if any, line above).", get_thread_id_cached());
     }
     if (errno == EINTR) [[unlikely]] {
-        if (static_cast<int>(HDE::log_level) >= 1) LOG_INFO(logger, "[Thread {}]: Message: A possible interrupted system call is detected.", get_thread_id_cached());
+        if (HDE::server_config.log_level != MINIMAL) LOG_INFO(logger, "[Thread {}]: Message: A possible interrupted system call is detected.", get_thread_id_cached());
     } else if (errno == EMFILE || errno == ENFILE) [[unlikely]] {
-        if (static_cast<int>(HDE::log_level) >= 1) LOG_INFO(logger, "[Thread {}]: Message: The server is using a lot of resources (Too many open files). Check immediately.", get_thread_id_cached());
-    } else if (static_cast<int>(HDE::log_level) >= 1) [[likely]] {
+        if (HDE::server_config.log_level != MINIMAL) LOG_INFO(logger, "[Thread {}]: Message: The server is using a lot of resources (Too many open files). Check immediately.", get_thread_id_cached());
+    } else if (HDE::server_config.log_level != MINIMAL) [[likely]] {
         LOG_INFO(logger, "[Thread {}]: Message: {}", get_thread_id_cached(), strerror(errno));
     } else return;
 }
@@ -128,12 +115,12 @@ inline void HDE::reportErrorMessage(quill::Logger* logger) {
 //(Probably implemented in the future) Function will repeatedly try to add; and will wait for 
 void HDE::AddressQueue::emplace_response(int loc, std::span<const char> data, quill::Logger* logger) {
     {
-        std::lock_guard<std::mutex> lock(address_queue_mutex);
+        std::scoped_lock<std::mutex> lock(HDE::serverState.address_queue_mutex);
         //have a wait condition here that waits until responder queue has space
-        if (address_queue.size() < HDE::max_incoming_address_queue_size) [[likely]] {
+        if (address_queue.size() < HDE::server_config.MAX_ADDRESS_QUEUE_SIZE) [[likely]] {
             address_queue.emplace(loc, std::string(data.data(), data.size()));
         } else [[unlikely]] {
-            if (static_cast<int>(HDE::log_level) >= 2) LOG_INFO(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::max_incoming_address_queue_size);
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) LOG_INFO(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_ADDRESS_QUEUE_SIZE);
             return;
         }
         //while (true) {
@@ -145,13 +132,13 @@ void HDE::AddressQueue::emplace_response(int loc, std::span<const char> data, qu
 //Thread-safe, do not lock address_queue_mutex within the same scope of the function
 void HDE::AddressQueue::emplace_response(const int location, const std::string_view msg, quill::Logger* logger) {
     {
-        std::lock_guard<std::mutex> lock(address_queue_mutex);
+        std::scoped_lock<std::mutex> lock(HDE::serverState.address_queue_mutex);
         //have a wait condition here that waits until responder queue has space
-        if (address_queue.size() < HDE::max_incoming_address_queue_size) [[likely]] {
+        if (address_queue.size() < HDE::server_config.MAX_ADDRESS_QUEUE_SIZE) [[likely]] {
             address_queue.emplace(location, msg);
         } else [[unlikely]]  {
-            if (static_cast<int>(HDE::log_level) >= 2) {
-                LOG_INFO(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::max_incoming_address_queue_size);
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
+                LOG_INFO(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_ADDRESS_QUEUE_SIZE);
             } else return;
         }
     }
@@ -159,7 +146,7 @@ void HDE::AddressQueue::emplace_response(const int location, const std::string_v
 }
 //Thread-safe, do not lock address_queue_mutex within the same scope of the function
 struct Request HDE::AddressQueue::get_response() {
-    std::lock_guard<std::mutex> lock(address_queue_mutex);
+    std::scoped_lock<std::mutex> lock(HDE::serverState.address_queue_mutex);
     if (!address_queue.empty()) [[likely]] {
         struct Request res = std::move(address_queue.front());
         address_queue.pop();
@@ -168,19 +155,19 @@ struct Request HDE::AddressQueue::get_response() {
 }
 //Thread-safe, do not lock address_queue_mutex within the same scope of the function
 int HDE::AddressQueue::get_size() const noexcept {
-    std::lock_guard<std::mutex> lock(address_queue_mutex);
+    std::scoped_lock<std::mutex> lock(HDE::serverState.address_queue_mutex);
     return address_queue.size();
 }
 //Thread-safe, do not lock address_queue_mutex within the same scope of the function
 void HDE::AddressQueue::closeAllConnections() {
     std::vector<int> fds_to_close;
     {
-        std::lock_guard<std::mutex> lock(address_queue_mutex);
+        std::scoped_lock<std::mutex> lock(HDE::serverState.address_queue_mutex);
         while (!address_queue.empty()) {
             if (address_queue.front().location != -1) [[likely]] {
                 fds_to_close.push_back(address_queue.front().location);
-            address_queue.pop();
             }
+            address_queue.pop();
         }
     }
     for (int fd : fds_to_close) {
@@ -193,7 +180,7 @@ void HDE::AddressQueue::closeAllConnections() {
 /*void HDE::AddressQueue::closeAllConnections() noexcept(false) {
     std::vector<int> fds_to_close;
     {
-        std::lock_guard<std::mutex> lock(address_queue_mutex);
+        std::scoped_lock<std::mutex> lock(address_queue_mutex);
         fds_to_close.reserve(address_queue.size());
         
         while (!address_queue.empty()) {
@@ -216,30 +203,30 @@ void HDE::AddressQueue::closeAllConnections() {
 }*/
 //Thread-safe, do not lock address_queue_mutex within the same scope of the function
 bool HDE::AddressQueue::empty() const noexcept {
-    std::lock_guard<std::mutex> lock(address_queue_mutex);
+    std::scoped_lock<std::mutex> lock(HDE::serverState.address_queue_mutex);
     return address_queue.empty();
 }
 //will not add element if adding them means allResponses's size exceeds HDE::maxResponsesQueue.
 //in the future if the website grows might switch [[likely]] with [[unlikely]]
 /*void HDE::ResponderQueue::emplace_response(int loc, std::span<const char> data, quill::Logger* logger) noexcept {
-    std::lock_guard<std::mutex> lock(responder_queue_mutex);
+    std::scoped_lock<std::mutex> lock(responder_queue_mutex);
     if (allResponses.size() <= HDE::max_responses_queue_size) [[likely]] {
         allResponses.emplace(loc, std::string(data.data(), data.size()));
         resp_in_res_queue.notify_one();
     } else [[unlikely]] {
-        if (static_cast<int>(HDE::log_level) >= 2) LOG_INFO(logger, "[Thread {}]: Rejecting client due to max_responses_queue_size overflow; Overflow limit: {} clients.", get_thread_id_cached(), std::to_string(HDE::max_responses_queue_size));
+        if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) LOG_INFO(logger, "[Thread {}]: Rejecting client due to max_responses_queue_size overflow; Overflow limit: {} clients.", get_thread_id_cached(), std::to_string(HDE::max_responses_queue_size));
     }
 }*/
 //Thread-safe, do not lock responder_queue_mutex within the same scope of the function
 void HDE::ResponderQueue::emplace_response(const int destination, const std::string_view msg, quill::Logger* logger) {
     {
-        std::lock_guard<std::mutex> lock(responder_queue_mutex);
-        if (allResponses.size() <= HDE::max_responses_queue_size) [[likely]] {
+        std::scoped_lock<std::mutex> lock(HDE::serverState.responder_queue_mutex);
+        if (allResponses.size() <= HDE::server_config.MAX_RESPONSES_QUEUE_SIZE) [[likely]] {
             allResponses.emplace(destination, msg);
         } else [[unlikely]] {
             //have a wait condition here that waits until responder queue has space
-            if (static_cast<int>(HDE::log_level) >= 1) {
-                LOG_INFO(logger, "[Thread {}]: Rejecting client due to max_responses_queue_size overflow; Overflow limit: {} clients.", get_thread_id_cached(), HDE::max_responses_queue_size);
+            if (HDE::server_config.log_level != MINIMAL) {
+                LOG_INFO(logger, "[Thread {}]: Rejecting client due to max_responses_queue_size overflow; Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_RESPONSES_QUEUE_SIZE);
             }
         }
         return;
@@ -248,7 +235,7 @@ void HDE::ResponderQueue::emplace_response(const int destination, const std::str
 }
 //Thread-safe, do not lock responder_queue_mutex within the same scope of the function
 struct Response HDE::ResponderQueue::get_response() noexcept {
-    std::lock_guard<std::mutex> lock(responder_queue_mutex);
+    std::scoped_lock<std::mutex> lock(HDE::serverState.responder_queue_mutex);
     if (!allResponses.empty()) [[likely]] {
         struct Response destination = std::move(allResponses.front());
         allResponses.pop();
@@ -257,19 +244,19 @@ struct Response HDE::ResponderQueue::get_response() noexcept {
 }
 //Thread-safe, do not lock responder_queue_mutex within the same scope of the function
 int HDE::ResponderQueue::get_size() const noexcept {
-    std::lock_guard<std::mutex> lock(responder_queue_mutex);
+    std::scoped_lock<std::mutex> lock(HDE::serverState.responder_queue_mutex);
     return allResponses.size();
 }
 //Thread-safe, do not lock responder_queue_mutex within the same scope of the function
 void HDE::ResponderQueue::closeAllConnections() {
     std::vector<int> fds_to_close;
     {
-        std::lock_guard<std::mutex> lock(responder_queue_mutex);
+        std::scoped_lock<std::mutex> lock(HDE::serverState.responder_queue_mutex);
         while (!allResponses.empty()) {
             if (allResponses.front().destination != -1) [[likely]] {
                 fds_to_close.push_back(allResponses.front().destination);
-            allResponses.pop();
             }
+            allResponses.pop();
         }
     }
     for (int fd : fds_to_close) {
@@ -282,7 +269,7 @@ void HDE::ResponderQueue::closeAllConnections() {
 /*void HDE::AddressQueue::closeAllConnections() noexcept(false) {
     std::vector<int> fds_to_close;
     {
-        std::lock_guard<std::mutex> lock(responder_queue_mutex);
+        std::scoped_lock<std::mutex> lock(responder_queue_mutex);
         fds_to_close.reserve(allResponses.size());
         
         while (!allResponses.empty()) {
@@ -305,18 +292,18 @@ void HDE::ResponderQueue::closeAllConnections() {
 }*/
 //Thread-safe, do not lock responder_queue_mutex within the same scope of the function
 bool HDE::ResponderQueue::empty() const noexcept {
-    std::lock_guard<std::mutex> lock(responder_queue_mutex);
+    std::scoped_lock<std::mutex> lock(HDE::serverState.responder_queue_mutex);
     return allResponses.empty();
 }
 
 //Constructor
-HDE::Server::Server(quill::Logger* logger) : SimpleServer(AF_INET, SOCK_STREAM, 0, HDE::Port, INADDR_ANY, HDE::queueCount) {
+HDE::Server::Server(quill::Logger* logger) : SimpleServer(AF_INET, SOCK_STREAM, 0, HDE::server_config.PORT, INADDR_ANY, HDE::server_config.queueCount) {
     HDE::Server::launch(logger);
 }
 
 //probably not ever gonna use this function but don't delete it we might, and i say might need it in the future (no promises)
 void HDE::clean_server_shutdown(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue) {
-    serverState.stop_server.store(true, std::memory_order_seq_cst);
+    HDE::serverState.stop_server.store(true, std::memory_order_seq_cst);
     address_queue.closeAllConnections();
     responder_queue.closeAllConnections();
     resp_in_res_queue.notify_all();
@@ -327,28 +314,27 @@ void HDE::clean_server_shutdown(HDE::AddressQueue& address_queue, HDE::Responder
 bool HDE::is_rate_limited(std::string_view client_ip) {
     size_t shard = std::hash<std::string_view>{}(client_ip) % NUM_RATE_LIMIT_SHARDS;
     auto& [mutex, limiters, _] = rate_limit_shards[shard];
-    std::lock_guard<std::mutex> lock(rate_limited_mutex);
+    std::scoped_lock<std::mutex> lock(HDE::serverState.rate_limited_mutex);
     auto now = std::chrono::steady_clock::now();
     RateLimiter& limiter = limiters[std::string(client_ip)];
     size_t recent = limiter.count_recent(std::chrono::seconds(1));
-    if (recent >= HDE::MAX_CONNECTIONS_PER_SECOND) [[unlikely]] return true;
+    if (recent >= HDE::server_config.MAX_CONNECTIONS_PER_SECOND) [[unlikely]] return true;
     limiter.add(now);
     return false;
 }
 //Runs on independent thread
 void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logger) {
-    std::unique_lock<std::mutex> init_lock(init_mutex);
-    std::unique_lock<std::mutex> addr_lock(address_queue_mutex, std::defer_lock);
-    //std::unique_lock<std::mutex> add_in_queue(address_in_queue_mutex, std::defer_lock);
+    std::unique_lock<std::mutex> init_lock(HDE::serverState.init_mutex);
+    std::unique_lock<std::mutex> addr_lock(HDE::serverState.address_queue_mutex, std::defer_lock);
     finish_initialization.wait(init_lock, [] {
-        return serverState.finished_initialization.load(std::memory_order_acquire);
+        return HDE::serverState.finished_initialization.load(std::memory_order_acquire);
     });
     LOG_INFO(logger, "[Thread {}]: [Accepter] Initializing...", get_thread_id_cached());
     init_lock.unlock();
-    char local_buf[sizeof(buffer)];
+    char local_buf[HDE::server_config.MAX_BUFFER_SIZE];
     char ip_str[INET6_ADDRSTRLEN];
     int client_socket_fd;
-    const size_t MAX_PACKET_SIZE = sizeof(buffer) - 1;
+    const size_t MAX_PACKET_SIZE = HDE::server_config.MAX_BUFFER_SIZE - 1;
     int res;
     ssize_t bytesRead;
     //Epoll set up, good for batching requests then process at once, but it's only good for managing hundreds/thousands of concurrent connections.
@@ -387,7 +373,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
                 break;
             }
             if (nev == 0) {
-                if (static_cast<int>(HDE::log_level) >= 2) [[unlikely]] LOG_INFO(logger, "[Thread {}]: [Accepter] No activity in 5 seconds.", get_thread_id_cached());
+                if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) [[unlikely]] LOG_INFO(logger, "[Thread {}]: [Accepter] No activity in 5 seconds.", get_thread_id_cached());
                 continue;
             }
             for (int i = 0; i < nev; ++i) {
@@ -402,26 +388,26 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
                 }
             }
         #endif*/
-        if (serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] break;
-        if (static_cast<int>(HDE::log_level) >= 1) {
+        if (HDE::serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] break;
+        if (HDE::server_config.log_level != MINIMAL) {
             LOG_INFO(logger, "[Thread {}]: [Accepter] Waiting for requests...", get_thread_id_cached());
         }
         struct sockaddr_in address = get_socket() -> get_address();
         client_socket_fd = accept(get_socket() -> get_sock(), reinterpret_cast<struct sockaddr*>(&address), reinterpret_cast<socklen_t*>(&addrlen));
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 1 reached.", get_thread_id_cached());
         }
         if (client_socket_fd < 0) [[unlikely]] {
-            if (static_cast<int>(HDE::log_level) >= 1) LOG_INFO(logger, "[Thread {}]: [Accepter] A client cannot connect to the server.", get_thread_id_cached());
+            if (HDE::server_config.log_level != MINIMAL) LOG_INFO(logger, "[Thread {}]: [Accepter] A client cannot connect to the server.", get_thread_id_cached());
             HDE::reportErrorMessage(logger);
             continue;
         }
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 2 reached.", get_thread_id_cached());
         }
         res = getnameinfo(reinterpret_cast<struct sockaddr*>(&address), sizeof(address), ip_str, INET6_ADDRSTRLEN, nullptr, 0, NI_NUMERICHOST);
         if (res != 0) [[unlikely]] {
-            if (static_cast<int>(HDE::log_level) >= 2) {
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] A client has an unknown IP address. The server will attempt to close the connection; and shuts it down if that fails.", get_thread_id_cached());
             }
             HDE::reportErrorMessage(logger);
@@ -430,11 +416,11 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             }
             continue;
         }
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 3 reached.", get_thread_id_cached());
         }
-        if (HDE::is_rate_limited(std::string(ip_str)) && HDE::enable_DoS_protection) [[unlikely]] {
-            if (static_cast<int>(HDE::log_level) >= 1) {
+        if (HDE::is_rate_limited(std::string(ip_str)) && HDE::server_config.enable_DoS_protection) [[unlikely]] {
+            if (HDE::server_config.log_level != MINIMAL) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] Deteched possible DoS attempt from client {}. The server will attempt to close the connection, and shuts it if that fails.", get_thread_id_cached(), ip_str);
             }
             if (close(client_socket_fd) == -1) {
@@ -443,23 +429,23 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             continue;
         }
         bytesRead = read(client_socket_fd, local_buf, sizeof(local_buf) - 1);
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 4 reached.", get_thread_id_cached());
         }
         if (bytesRead > 0 && bytesRead < sizeof(local_buf) - 1) [[likely]] {
             local_buf[bytesRead] = '\0'; //null terminator
-            if (static_cast<int>(HDE::log_level) >= 3) {
+            if (HDE::server_config.log_level == FULL) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] About to acquire address_queue_mutex in .emplate_response()", get_thread_id_cached());
             }
             address_queue.emplace_response(client_socket_fd, std::span(local_buf, bytesRead), logger);
-            if (static_cast<int>(HDE::log_level) >= 2) {
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] Received data from {}:\n{}", get_thread_id_cached(), ip_str, std::string(local_buf));
-            } else if (HDE::log_level == DECREASED) {
+            } else if (HDE::server_config.log_level == DECREASED) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] Client {} is connected.", get_thread_id_cached(), ip_str);
             }
             continue;
         } else if (bytesRead == 0) [[unlikely]] {
-            if (static_cast<int>(HDE::log_level) >= 1) {
+            if (HDE::server_config.log_level != MINIMAL) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] A client is disconnected to the server. No bytes are read. IP: {}. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached(), ip_str);
             }
             HDE::reportErrorMessage(logger);
@@ -468,7 +454,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             }
             continue;
         } else if (bytesRead >= sizeof(local_buf) - 1) [[unlikely]] {
-            if (static_cast<int>(HDE::log_level) >= 1) {
+            if (HDE::server_config.log_level != MINIMAL) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] A client has a packet that could trigger a buffer overflow, either by an oversized request or a DoS attempt. Client IP: {}. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached(), ip_str);
             }
             if (close(client_socket_fd) == -1) {
@@ -476,7 +462,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             }
             continue;
         } else {
-            if (static_cast<int>(HDE::log_level) >= 2) {
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] General read error encountered. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached());
             }
             HDE::reportErrorMessage(logger);
@@ -497,14 +483,12 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
 //Runs on independent thread
 //Retrieve the incoming request from AddressQueue object, then load the processed request into the ResponderQueue object
 void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue, quill::Logger* logger) {
-    std::unique_lock<std::mutex> init_lock(init_mutex);
-    std::unique_lock<std::mutex> addr_lock(address_queue_mutex, std::defer_lock);
-    std::unique_lock<std::mutex> resp_lock(responder_queue_mutex, std::defer_lock);
-    std::unique_lock<std::mutex> cv_lock(address_cv_mutex, std::defer_lock);
-    //std::unique_lock<std::mutex> add_in_queue(address_in_queue_mutex, std::defer_lock);
-    //std::unique_lock<std::mutex> resp_in_queue(response_in_queue_mutex, std::defer_lock);
+    std::unique_lock<std::mutex> init_lock(HDE::serverState.init_mutex);
+    std::unique_lock<std::mutex> addr_lock(HDE::serverState.address_queue_mutex, std::defer_lock);
+    std::unique_lock<std::mutex> resp_lock(HDE::serverState.responder_queue_mutex, std::defer_lock);
+    std::unique_lock<std::mutex> cv_lock(HDE::serverState.address_cv_mutex, std::defer_lock);
     finish_initialization.wait(init_lock, [] { 
-        return serverState.finished_initialization.load(std::memory_order_acquire);
+        return HDE::serverState.finished_initialization.load(std::memory_order_acquire);
     });
     LOG_INFO(logger, "[Thread {}]: [Handler] Initializing...", get_thread_id_cached());
     init_lock.unlock();
@@ -513,33 +497,33 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
     struct Request client;
     size_t content_length;
     for (;;) {
-        if (serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] {
+        if (HDE::serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Handler] Terminating handler loop...", get_thread_id_cached());
             address_queue.closeAllConnections();
             responder_queue.closeAllConnections();
             break;
         }
-        if (static_cast<int>(HDE::log_level) >= 1) {
+        if (HDE::server_config.log_level != MINIMAL) {
             LOG_INFO(logger, "[Thread {}]: [Handler] Waiting for tasks...", get_thread_id_cached());
         }
         {
-            if (static_cast<int>(HDE::log_level) >= 3) {
+            if (HDE::server_config.log_level == FULL) {
                 LOG_INFO(logger, "[Thread {}]: [Handler] Acquired address_cv_mutex", get_thread_id_cached());
             }
             cv_lock.lock();
             addr_in_addr_queue.wait(cv_lock, [&address_queue] {
-                return serverState.stop_server.load(std::memory_order_seq_cst) || !address_queue.empty();
+                return HDE::serverState.stop_server.load(std::memory_order_seq_cst) || !address_queue.empty();
             });
             cv_lock.unlock();
         }
-        if (serverState.stop_server.load(std::memory_order_seq_cst)) [[unlikely]] continue;
+        if (HDE::serverState.stop_server.load(std::memory_order_seq_cst)) [[unlikely]] continue;
         //calling get_response() without the lock; double locking causes a deadlock
-        if (static_cast<int>(HDE::log_level) >= 3) {
+        if (HDE::server_config.log_level == FULL) {
             LOG_INFO(logger, "[Thread {}]: [Handler] (checkpoint)", get_thread_id_cached());
         }
         client = address_queue.get_response();
         if (client.location == 0) [[unlikely]] continue;
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Handler] Checkpoint 1 reached.", get_thread_id_cached());
         }
         HDE::Server::logClientInfo("Handler", client.msg, logger);
@@ -547,7 +531,7 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
         {
             //actually in the future try to implement an advanced file caching system that run on startup to avoid unnecessary operations
             //client request is stored in client.msg
-            std::lock_guard<std::mutex> lock(file_access_mutex);
+            std::scoped_lock<std::mutex> lock(HDE::serverState.file_access_mutex);
             std::fstream inputFile(html_file_path);
             if (!inputFile.is_open()) [[unlikely]] {
                 LOG_INFO(logger, "FATAL: Cannot open file: {}", html_file_path);
@@ -570,27 +554,27 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
             LOG_INFO(logger, "FATAL: File is empty.");
             exit(EXIT_FAILURE);
         }
-        if (static_cast<int>(HDE::log_level) >= 1) {
+        if (HDE::server_config.log_level != MINIMAL) {
             LOG_INFO(logger, "Template cache loaded: {} bytes", contents.length());
         }
         // <-- End server processing steps zone -->
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Handler] Checkpoint 2 reached.", get_thread_id_cached());
         }
         {
-            //std::lock_guard<std::mutex> lock(responder_queue_mutex); <- comment out to avoid double lock
-            if (static_cast<int>(HDE::log_level) >= 2) {
+            //std::scoped_lock<std::mutex> lock(responder_queue_mutex); <- comment out to avoid double lock
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 LOG_INFO(logger, "[Thread {}]: [Handler] Acquired responder_queue_mutex", get_thread_id_cached());
             }
             responder_queue.emplace_response(client.location, contents, logger);
             resp_in_res_queue.notify_one();
         }
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Handler] Checkpoint 3 reached.", get_thread_id_cached());
         }
-        if (HDE::continuous_responses) [[likely]] continue;
+        if (HDE::server_config.continuous_responses) [[likely]] continue;
         else [[unlikely]] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000 / HDE::handler_responses_per_second));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000 / HDE::server_config.handler_responses_per_second));
             continue;
         }
     }
@@ -599,11 +583,10 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
 }
 //Runs on independent thread
 void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger) {
-    std::unique_lock<std::mutex> init_lock(init_mutex);
-    std::unique_lock<std::mutex> cv_lock(response_cv_mutex, std::defer_lock);
-    //std::unique_lock<std::mutex> resp_in_queue(response_in_queue_mutex, std::defer_lock);
+    std::unique_lock<std::mutex> init_lock(HDE::serverState.init_mutex);
+    std::unique_lock<std::mutex> cv_lock(HDE::serverState.response_cv_mutex, std::defer_lock);
     finish_initialization.wait(init_lock, [] {
-        return serverState.finished_initialization.load(std::memory_order_acquire);
+        return HDE::serverState.finished_initialization.load(std::memory_order_acquire);
     });
     LOG_INFO(logger, "[Thread {}]: [Responder] Initializing...", get_thread_id_cached());
     init_lock.unlock();
@@ -611,91 +594,91 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
     const char* msg;
     ssize_t res;
     for (;;) {
-        if (serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] {
+        if (HDE::serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Responder] Terminating responder loop...", get_thread_id_cached());
             response.closeAllConnections();
             break;
         }
         {
-            if (static_cast<int>(HDE::log_level) >= 3) LOG_INFO(logger, "[Thread {}]: [Responder] Acquired responder_cv_mutex", get_thread_id_cached());
-            if (static_cast<int>(HDE::log_level) >= 1) LOG_INFO(logger, "[Thread {}]: [Responder] Waiting for tasks...", get_thread_id_cached());
+            if (HDE::server_config.log_level == FULL) LOG_INFO(logger, "[Thread {}]: [Responder] Acquired responder_cv_mutex", get_thread_id_cached());
+            if (HDE::server_config.log_level != MINIMAL) LOG_INFO(logger, "[Thread {}]: [Responder] Waiting for tasks...", get_thread_id_cached());
             cv_lock.lock();
             resp_in_res_queue.wait(cv_lock, [&response] {
-                return serverState.stop_server.load(std::memory_order_acquire) || !response.empty();
+                return HDE::serverState.stop_server.load(std::memory_order_acquire) || !response.empty();
             });
             cv_lock.unlock();
         }
-        if (serverState.stop_server.load(std::memory_order_seq_cst)) [[unlikely]] continue;
+        if (HDE::serverState.stop_server.load(std::memory_order_seq_cst)) [[unlikely]] continue;
         client = response.get_response();
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Responder] Checkpoint 1 reached.", get_thread_id_cached());
         }
         if (client == Response{}) [[unlikely]] continue;
         msg = client.msg.c_str();
-        if (static_cast<int>(HDE::log_level) >= 1) {
+        if (HDE::server_config.log_level != MINIMAL) {
             LOG_INFO(logger, "[Thread {}]: [Responder] Received data from [Handler]. Processing...", get_thread_id_cached());
         }
         //In the future implement a loop here that keeps track of bytes being sent, then repeatedly spamming packets until remaining bytes = 0
         res = write(client.destination, msg, client.msg.length());
-        if (static_cast<int>(HDE::log_level) >= 2) {
+        if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
             LOG_INFO(logger, "[Thread {}]: [Responder] Result of variable <res>: {}", get_thread_id_cached(), std::to_string(res));
         }
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Responder] Checkpooint 2 reached.", get_thread_id_cached());
         }
         if (res == -1) [[unlikely]] {
             //case where the server failed to send the message
-            if (static_cast<int>(HDE::log_level) >= 2) {
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 LOG_INFO(logger, "[Thread {}]: [Responder] ERROR: A client failed to receive the data.", get_thread_id_cached());
             }
             //try to clean this in the future
             int error_code = errno;
             if (error_code == EAGAIN || error_code == EWOULDBLOCK) [[unlikely]] { //In the future the server might ran out of resources easily, so if possible change [[unlikely]] to [[likely]].
-                if (static_cast<int>(HDE::log_level) >= 3) {
+                if (HDE::server_config.log_level == FULL) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] The kernel's socket sending buffer is full, try writing again later. Continuously trying again the write() will be implemented in the future (not near).", get_thread_id_cached());
                 }
                 continue;
             } else if (error_code == EPIPE) [[unlikely]] {
-                if (static_cast<int>(HDE::log_level) >= 3) {
+                if (HDE::server_config.log_level == FULL) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] The socket has been closed by the client while transmission is happening.", get_thread_id_cached());
                 }
                 continue;
             } else if (error_code == ECONNRESET) [[likely]] {
-                if (static_cast<int>(HDE::log_level) >= 3) {
+                if (HDE::server_config.log_level == FULL) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] The connection is reset by the peer. It could be an abrupt shut down or sent a TCP reset packet.", get_thread_id_cached());
                 }
                 continue;
             } else if (error_code == ETIMEDOUT) [[unlikely]] {
-                if (static_cast<int>(HDE::log_level) >= 3) {
+                if (HDE::server_config.log_level == FULL) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] A network time out happened during transmission.", get_thread_id_cached());
                 }
                 continue;
             } else if (error_code == EBADF) [[unlikely]] {
-                if (static_cast<int>(HDE::log_level) >= 3) {
+                if (HDE::server_config.log_level == FULL) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] The file is invalid; it has either been closed or never opened, or another unknown issue.", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
             } else if (error_code == EINVAL) [[unlikely]] {
-                if (static_cast<int>(HDE::log_level) >= 3) {
+                if (HDE::server_config.log_level == FULL) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] The file is valid but is not available for transission.", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
             } else if (error_code == EINTR) [[unlikely]] {
-                if (static_cast<int>(HDE::log_level) >= 3) {
+                if (HDE::server_config.log_level == FULL) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] The socket has been closed by the client while transmission is happening, or an interrupted system call (normally I.S.Cs are usually harmless). Restarting the write function would be the way to go; implementing a loop to continuosly try the write() in the future (not near).", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
             } else if (error_code == ENOMEM) [[unlikely]] {
-                if (static_cast<int>(HDE::log_level) >= 3) {
+                if (HDE::server_config.log_level == FULL) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] The server ran out of memory trying to complete the request. Either there being not enough memory (while creating internal structures), or this is a sign of a possible attack.", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
             } else [[likely]] {
-                if (static_cast<int>(HDE::log_level) >= 2) {
+                if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                     LOG_INFO(logger, "[Thread {}]: [Responder] An undocumented error occured.", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
@@ -703,35 +686,35 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
             }
         } else if (res > 0) [[likely]] {
             //successful tramission
-            if (static_cast<int>(HDE::log_level) >= 1) {
+            if (HDE::server_config.log_level != MINIMAL) {
                 LOG_INFO(logger, "[Thread {}]: [Responder] Successful data transmissiont to the client.", get_thread_id_cached());
             }
         } else if (res == 0) [[unlikely]] {
             //requested to write 0 bytes. typically not an error, but log this event
-            if (static_cast<int>(HDE::log_level) >= 2) {
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 LOG_INFO(logger, "[Thread {}]: [Responder] 0 bytes sent to the client. Either they requested 0 bytes or this could be an internal server error causing no bytes to be sent.", get_thread_id_cached());
             }
         }
-        if (static_cast<int>(HDE::log_level) >= 3) [[unlikely]] {
+        if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Responder] Checkpoint 2 reached.", get_thread_id_cached());
         }
         if (close(client.destination) == -1) {
-            if (static_cast<int>(HDE::log_level) >= 3) {
+            if (HDE::server_config.log_level == FULL) {
                 LOG_INFO(logger, "[Thread {}]: [Responder] An error occured while trying to close the connection. The server will force a shut down.", get_thread_id_cached());
             }
             HDE::reportErrorMessage(logger);
             HDE::Server::logClientInfo("Responder", client.msg, logger);
             shutdown(client.destination, SHUT_RDWR);
         }
-        if (static_cast<int>(HDE::log_level) >= 2) {
+        if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
             LOG_INFO(logger, "========================= Log Separator =========================");
         }
-        else if (HDE::log_level == MINIMAL || HDE::log_level == DECREASED) {
+        else if (HDE::server_config.log_level == MINIMAL || HDE::server_config.log_level == DECREASED) {
             LOG_INFO(logger, "A client is processed by the server.");
         }
-        if (HDE::continuous_responses) [[likely]] continue;
+        if (HDE::server_config.continuous_responses) [[likely]] continue;
         else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000 / HDE::responder_responses_per_second));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000 / HDE::server_config.responder_responses_per_second));
             continue;
         }
     }
@@ -741,59 +724,76 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
 
 void HDE::Server::launch(quill::Logger* logger) {
     //Checking server configurations before start
-    if (HDE::totalUsedThreads > HDE::NUM_THREADS) [[unlikely]] {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The amount of allocated threads is: {} threads. The amount of available threads: {} threads. Exiting...", get_thread_id_cached(), HDE::totalUsedThreads, HDE::NUM_THREADS);
+    //The totalUsedThreads and individual thread allocation for each tasks checks are mostly for future performance improvements such as cpu core pinning.
+    if (HDE::server_config.totalUsedThreads > HDE::NUM_THREADS) [[unlikely]] {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The amount of allocated threads is: {} threads. The amount of available threads: {} threads. Exiting...", get_thread_id_cached(), HDE::server_config.totalUsedThreads, HDE::NUM_THREADS);
         exit(EXIT_FAILURE);
-    } else if (HDE::threadsForAccepter > HDE::NUM_THREADS - 1 || HDE::threadsForHandler > HDE::NUM_THREADS - 1 || HDE::threadsForResponder > HDE::NUM_THREADS - 1) [[unlikely]] {
+    } else if (HDE::server_config.threadsForAccepter > HDE::NUM_THREADS - 2 || HDE::server_config.threadsForHandler > HDE::NUM_THREADS - 2 || HDE::server_config.threadsForResponder > HDE::NUM_THREADS - 2) [[unlikely]] {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The maximum thread count for any task Accepter, Handler, or Responder is {} threads, thy shall not go over that. Exiting...", get_thread_id_cached(), std::to_string(HDE::NUM_THREADS - 2));
         exit(EXIT_FAILURE);
-    } else if (HDE::threadsForAccepter < 1 || HDE::threadsForHandler < 1 || HDE::threadsForResponder < 1) {
+    } else if (HDE::server_config.threadsForAccepter < 1 || HDE::server_config.threadsForHandler < 1 || HDE::server_config.threadsForResponder < 1) {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The minimum value for each tasks must be 1 threads.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::totalUsedThreads < 3) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The minimum value for total used threads is 3. The amount allocated: {}", HDE::get_thread_id_cached(), std::to_string(HDE::totalUsedThreads));
+    } else if (HDE::server_config.totalUsedThreads < 3) {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The minimum value for total used threads is 3. The amount allocated: {}", HDE::get_thread_id_cached(), std::to_string(HDE::server_config.totalUsedThreads));
         exit(EXIT_FAILURE);
-    } else if (HDE::queueCount < 1) {
+    } else if (HDE::server_config.queueCount < 1) {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid queueCount configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::MAX_CONNECTIONS_PER_SECOND < 1) {
+    } else if (HDE::server_config.MAX_CONNECTIONS_PER_SECOND < 1) {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid MAX_CONNECTIONS_PER_SECOND configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::max_incoming_address_queue_size < 1) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid max_incoming_address_queue_size configuration.", HDE::get_thread_id_cached());
+    } else if (HDE::server_config.MAX_ADDRESS_QUEUE_SIZE < 1) {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid server_config.MAX_ADDRESS_QUEUE_SIZE configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::max_responses_queue_size < 1) {
+    } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < 1) {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid max_responses_queue_size configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::MAX_BUFFER_SIZE < 1) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid MAX_BUFFER_SIZE configuration. Normally I'd recommend setting the client request size in bytes to around 30000.", HDE::get_thread_id_cached());
+    } else if (HDE::server_config.MAX_BUFFER_SIZE < 1) {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid server_config.MAX_BUFFER_SIZE configuration. Normally I'd recommend setting the client request size in bytes to around 30000.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (static_cast<int>(HDE::log_level) < 0) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid log_level configuration.", HDE::get_thread_id_cached());
+    } else if (static_cast<int>(HDE::server_config.log_level) < 0) {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid server_config.log_level configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     }
-    if (HDE::NUM_THREADS < 1) {
+    if (HDE::NUM_THREADS < 1)[[unlikely]] {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] This is not your fault; the server doesn't return a valid thread amount.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     } 
+    //Warnings/Advisories
+    if (HDE::server_config.MAX_BUFFER_SIZE < 30000 && HDE::server_config.MAX_BUFFER_SIZE > 500) [[unlikely]] {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] WARNING: BUFFER_SIZE might be insufficient to receive client requests.", HDE::get_thread_id_cached());
+    } else if (HDE::server_config.MAX_ADDRESS_QUEUE_SIZE < 10000) [[unlikely]] {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have server_config.MAX_ADDRESS_QUEUE_SIZE more than 10000, in case the amount of requests backs up during peaj/extreme loads.", HDE::get_thread_id_cached());
+    } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < 10000) [[unlikely]] {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have max_responses_queue_size more than 10000, in case the amount of responses backs up during peak/extreme loads.", HDE::get_thread_id_cached());
+    }
     //can totally remove, it's just the upper cap for the variables; they won't even be used anyway, they should be disabled to get max throughput
-    if (HDE::handler_responses_per_second > 1000) [[unlikely]] {
-        HDE::handler_responses_per_second = 1000;
+    if (HDE::server_config.handler_responses_per_second > 1000) [[unlikely]] {
+        HDE::server_config.handler_responses_per_second = 1000;
     }
-    if (HDE::responder_responses_per_second > 1000) [[unlikely]] {
-        HDE::responder_responses_per_second = 1000;
+    if (HDE::server_config.responder_responses_per_second > 1000) [[unlikely]] {
+        HDE::server_config.responder_responses_per_second = 1000;
     }
-    std::ios_base::sync_with_stdio(HDE::IOSynchronization);
+    std::ios_base::sync_with_stdio(HDE::server_config.IO_SYNCHONIZATION);
     HDE::AddressQueue address_queue;
     HDE::ResponderQueue responder_queue;
-    std::vector<std::jthread> processes(HDE::totalUsedThreads);
+    std::vector<std::jthread> processes(HDE::server_config.totalUsedThreads);
     //initialize the threads
-    for (size_t i = 0; i < HDE::threadsForAccepter; ++i) processes[i] = std::jthread(&HDE::Server::accepter, this, std::ref(address_queue), logger);
-    for (size_t i = HDE::threadsForAccepter; i < HDE::threadsForAccepter + HDE::threadsForHandler; ++i) processes[i] = std::jthread(&HDE::Server::handler, this, std::ref(address_queue), std::ref(responder_queue), logger);
-    for (size_t i = HDE::threadsForAccepter + HDE::threadsForHandler; i < HDE::totalUsedThreads; ++i) processes[i] = std::jthread(&HDE::Server::responder, this, std::ref(responder_queue), logger);
+    for (size_t i = 0; i < HDE::server_config.threadsForAccepter; ++i) {
+        processes[i] = std::jthread(&HDE::Server::accepter, this, std::ref(address_queue), logger);
+    }
+    for (size_t i = HDE::server_config.threadsForAccepter; i < HDE::server_config.threadsForAccepter + HDE::server_config.threadsForHandler; ++i) {
+        processes[i] = std::jthread(&HDE::Server::handler, this, std::ref(address_queue), std::ref(responder_queue), logger);
+    }
+    for (size_t i = HDE::server_config.threadsForAccepter + HDE::server_config.threadsForHandler; i < HDE::server_config.totalUsedThreads; ++i) {
+        processes[i] = std::jthread(&HDE::Server::responder, this, std::ref(responder_queue), logger);
+    }
     LOG_INFO(logger, "[Thread {}]: [Main Thread] Threads initialized.", get_thread_id_cached());
-    serverState.finished_initialization.store(true, std::memory_order_release);
-    for (int i = 0; i < processes.size(); ++i) finish_initialization.notify_all();
+    HDE::serverState.finished_initialization.store(true, std::memory_order_release);
+    for (int i = 0; i < processes.size(); ++i) {
+        finish_initialization.notify_all();
+    }
     LOG_INFO(logger, "[Thread {}]: [Main Thread] Main thread finished executing.", get_thread_id_cached());
 }
 
