@@ -49,10 +49,14 @@ if () [[likely/unlikely]] {
 * Never acquire a higher-priority lock while holding a lower one
 */
 
+//0x80000000 = 2147483648 -> -2147483647 (int)
+//0x8000000000000000 = 9223372036854775808 -> -9223372036854775807 (long long int/64-bit)
+
 //in the future, if possible create a struct for each of these mutexes/conditional variables and add padding; but only do it for frequently-accessed ones.
 alignas(CACHE_LINE_SIZE) socklen_t addrlen = sizeof(struct sockaddr_in);
 
 //definitions
+//keep conditional variables separate; they might cause unexpected deadlocks
 alignas(CACHE_LINE_SIZE) std::condition_variable finish_initialization;
 alignas(CACHE_LINE_SIZE) std::condition_variable addr_in_addr_queue;
 alignas(CACHE_LINE_SIZE) std::condition_variable resp_in_res_queue;
@@ -411,7 +415,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
                 LOG_INFO(logger, "[Thread {}]: [Accepter] A client has an unknown IP address. The server will attempt to close the connection; and shuts it down if that fails.", get_thread_id_cached());
             }
             HDE::reportErrorMessage(logger);
-            if (close(client_socket_fd) == -1) {
+            if (close(client_socket_fd) < 0) [[unlikely]] {
                 shutdown(client_socket_fd, SHUT_RDWR);
             }
             continue;
@@ -423,7 +427,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             if (HDE::server_config.log_level != MINIMAL) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] Deteched possible DoS attempt from client {}. The server will attempt to close the connection, and shuts it if that fails.", get_thread_id_cached(), ip_str);
             }
-            if (close(client_socket_fd) == -1) {
+            if (close(client_socket_fd) < 0) [[unlikely]] {
                 shutdown(client_socket_fd, SHUT_RDWR);
             }
             continue;
@@ -449,7 +453,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
                 LOG_INFO(logger, "[Thread {}]: [Accepter] A client is disconnected to the server. No bytes are read. IP: {}. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached(), ip_str);
             }
             HDE::reportErrorMessage(logger);
-            if (close(client_socket_fd) == -1) {
+            if (close(client_socket_fd) < 0) [[unlikely]] {
                 shutdown(client_socket_fd, SHUT_RDWR);
             }
             continue;
@@ -457,7 +461,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             if (HDE::server_config.log_level != MINIMAL) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] A client has a packet that could trigger a buffer overflow, either by an oversized request or a DoS attempt. Client IP: {}. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached(), ip_str);
             }
-            if (close(client_socket_fd) == -1) {
+            if (close(client_socket_fd) < 0) [[unlikely]] {
                 shutdown(client_socket_fd, SHUT_RDWR);
             }
             continue;
@@ -466,7 +470,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
                 LOG_INFO(logger, "[Thread {}]: [Accepter] General read error encountered. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached());
             }
             HDE::reportErrorMessage(logger);
-            if (close(client_socket_fd) == -1) {
+            if (close(client_socket_fd) < 0) [[unlikely]] {
                 shutdown(client_socket_fd, SHUT_RDWR);
             }
             continue;
@@ -482,6 +486,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
 }
 //Runs on independent thread
 //Retrieve the incoming request from AddressQueue object, then load the processed request into the ResponderQueue object
+//Function is computation-heavy, allocate more threads
 void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue, quill::Logger* logger) {
     std::unique_lock<std::mutex> init_lock(HDE::serverState.init_mutex);
     std::unique_lock<std::mutex> addr_lock(HDE::serverState.address_queue_mutex, std::defer_lock);
@@ -551,7 +556,7 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
             content_length, temp
         );
         if (contents.empty()) [[unlikely]] {
-            LOG_INFO(logger, "FATAL: File is empty.");
+            LOG_INFO(logger, "FATAL: File {} is empty.", html_file_path);
             exit(EXIT_FAILURE);
         }
         if (HDE::server_config.log_level != MINIMAL) {
@@ -582,6 +587,7 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
     return;
 }
 //Runs on independent thread
+//Keep this at 2+ threads until we find an optimized alternative to write()
 void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger) {
     std::unique_lock<std::mutex> init_lock(HDE::serverState.init_mutex);
     std::unique_lock<std::mutex> cv_lock(HDE::serverState.response_cv_mutex, std::defer_lock);
@@ -619,14 +625,14 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
             LOG_INFO(logger, "[Thread {}]: [Responder] Received data from [Handler]. Processing...", get_thread_id_cached());
         }
         //In the future implement a loop here that keeps track of bytes being sent, then repeatedly spamming packets until remaining bytes = 0
-        res = write(client.destination, msg, client.msg.length());
+        res = write(client.destination, msg, client.msg.length()); //try to use an alternative write() function in the future if possible
         if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
             LOG_INFO(logger, "[Thread {}]: [Responder] Result of variable <res>: {}", get_thread_id_cached(), std::to_string(res));
         }
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Responder] Checkpooint 2 reached.", get_thread_id_cached());
         }
-        if (res == -1) [[unlikely]] {
+        if (res < 0) [[unlikely]] {
             //case where the server failed to send the message
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 LOG_INFO(logger, "[Thread {}]: [Responder] ERROR: A client failed to receive the data.", get_thread_id_cached());
@@ -698,7 +704,7 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Responder] Checkpoint 2 reached.", get_thread_id_cached());
         }
-        if (close(client.destination) == -1) {
+        if (close(client.destination) < 0) [[unlikely]] {
             if (HDE::server_config.log_level == FULL) {
                 LOG_INFO(logger, "[Thread {}]: [Responder] An error occured while trying to close the connection. The server will force a shut down.", get_thread_id_cached());
             }
@@ -709,7 +715,7 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
         if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
             LOG_INFO(logger, "========================= Log Separator =========================");
         }
-        else if (HDE::server_config.log_level == MINIMAL || HDE::server_config.log_level == DECREASED) {
+        else if ((HDE::server_config.log_level == MINIMAL || HDE::server_config.log_level == DECREASED) && !HDE::server_config.disable_logging) {
             LOG_INFO(logger, "A client is processed by the server.");
         }
         if (HDE::server_config.continuous_responses) [[likely]] continue;
@@ -723,8 +729,8 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
 }
 
 void HDE::Server::launch(quill::Logger* logger) {
-    //Checking server configurations before start
     //The totalUsedThreads and individual thread allocation for each tasks checks are mostly for future performance improvements such as cpu core pinning.
+    //Checking server configurations during start up
     if (HDE::server_config.totalUsedThreads > HDE::NUM_THREADS) [[unlikely]] {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The amount of allocated threads is: {} threads. The amount of available threads: {} threads. Exiting...", get_thread_id_cached(), HDE::server_config.totalUsedThreads, HDE::NUM_THREADS);
         exit(EXIT_FAILURE);
