@@ -70,6 +70,13 @@ struct alignas(CACHE_LINE_SIZE * 8) serverStatus {
     char padding[8 * CACHE_LINE_SIZE - 2 * sizeof(std::atomic<bool>) - 10 * sizeof(std::mutex) /*Other future variables here*/];
 };
 
+struct ParsedRequest {
+        std::string method;
+        std::string path;
+        std::string_view version;
+        bool valid = false;
+    };
+
 namespace HDE {
     //Only create an object is this enum ONCE
     enum logLevel : int {
@@ -78,6 +85,41 @@ namespace HDE {
         DECREASED = 1,
         MINIMAL = 0
     };
+
+    //classes HTTPParser, ResponseCache, PathValidator, HTTPValidator are for security reasons.
+    class HTTPParser {
+        public:
+            static ParsedRequest parse_request_line(std::string_view request) noexcept;
+            //for parsing full headers, might need later
+            static std::unordered_map<std::string_view, std::string_view> parse_headers(std::string_view request) noexcept;
+    };
+
+    class ResponseCache {
+        private:
+            std::unordered_map<std::string_view, std::string_view> cache;
+            mutable std::shared_mutex cache_mutex;
+            std::string not_found_response;
+        public:
+            void load_files(const std::vector<std::pair<std::string, std::string>>& routes, quill::Logger* logger);
+            std::string_view get_response(std::string_view path) const noexcept;
+            bool reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger);
+    };
+
+    class PathValidator {
+        public:
+            static std::string sanitize_path(std::string_view raw_path) noexcept;
+            static std::string url_decode(const std::string& str) noexcept;
+            static int hex_to_int(char c) noexcept;
+    };
+
+    class HTTPValidator {
+        public:
+            static bool is_valid_method(std::string_view method) noexcept;
+            static bool is_valid_version(std::string_view method) noexcept;
+            static bool is_valid_request_line(std::string_view request) noexcept;
+            static bool is_valid_size(size_t size) noexcept;
+    };
+
     //in the future try to combine all configurations into a struct and pass into cpu for effective cache line usage.
 
     struct alignas(CACHE_LINE_SIZE) serverConfig {
@@ -88,8 +130,8 @@ namespace HDE {
         int queueCount = 1000000; //                    queue before being accepted, recommended 100K+
         int PORT = 80; //                               port, default to 80 is the easiest to test
         int MAX_CONNECTIONS_PER_SECOND = 40; //         connections per seconds threshold before rejecting due to possible DoS
-        int MAX_ADDRESS_QUEUE_SIZE = -1; //          recommended 10K+, in case requests pile up during loads, -1 to disable limit
-        int MAX_RESPONSES_QUEUE_SIZE = -1; //        recommended 10K+, in case requests pile up during loads, -1 to disable limit
+        int MAX_ADDRESS_QUEUE_SIZE = -1; //             -1 disables the limit
+        int MAX_RESPONSES_QUEUE_SIZE = -1; //           -1 disables the limit
         const size_t MAX_BUFFER_SIZE = 30721; //        size in bytes, recommended to be 30K+ bytes, avoid too high (50K+)
         enum logLevel log_level = MINIMAL; //           FULL / DEFAULT / DECREASED / MINIMAL
         bool disable_logging = true; //                Fully disables logging besides the start up and config checking logs
@@ -100,8 +142,8 @@ namespace HDE {
         //dev notes
         //Try to improve handler function efficiency. also the write() function in responder is extremely inefficient, look for faster and less overhead alternatives to the write() function.
 
-        int threadsForAccepter = 3; //                  minimum 1
-        int threadsForHandler = 4; //                   minimum 1, process is computation heavy so allocate more threads
+        int threadsForAccepter = 1; //                  minimum 1
+        int threadsForHandler = 6; //                   minimum 1, process is computation heavy so allocate more threads
         int threadsForResponder = 1; //                 minimum 1
         int totalUsedThreads = threadsForAccepter + threadsForHandler + threadsForResponder;
         bool continuous_responses = true; //            true / false                halting before calling a thread, just put true
@@ -112,7 +154,15 @@ namespace HDE {
 
         //              [ Security ]
 
-        bool enable_DoS_protection = false; //          true / false
+        bool enable_DoS_protection = false; //          true / 
+        bool valid_request_size_tolerance = 10240; //   a configurable tolerance for max HTTP request size in bytes
+    };
+
+    //Put all files in the server here so it is loaded during initialization
+    inline std::vector<std::pair<std::string, std::string>> file_routes_list = {
+        {"/", "/html_templates/index.html"},
+        {"/random", "/html_templates/path/random.html"}
+        // Add all your routes here
     };
 
     //DO NOT DELETE OR UNCOMMENT ANY OF THE COMMENTS THEY'RE THERE FOR A REASON
@@ -183,7 +233,7 @@ namespace HDE {
             void responder(HDE::ResponderQueue& response, quill::Logger* logger) override;
             //char buffer[buffer_size] = {0};
             int new_socket;
-            std::string html_file_path = "/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html_templates/index.html";
+            ResponseCache cache;
         public:
             Server(quill::Logger* logger);
             void launch(quill::Logger* logger) override;

@@ -326,6 +326,249 @@ bool HDE::is_rate_limited(std::string_view client_ip) {
     limiter.add(now);
     return false;
 }
+
+ParsedRequest HDE::HTTPParser::parse_request_line(std::string_view request) noexcept {
+    ParsedRequest result;
+    if (!HTTPValidator::is_valid_request_line(request)) [[unlikely]] {
+        return result;  // result.valid = false
+    }
+    size_t first_space = request.find(' ');
+    if (first_space == std::string_view::npos || first_space == 0) [[unlikely]] {
+        return result;
+    }
+    result.method = request.substr(0, first_space);
+    if (!HTTPValidator::is_valid_method(result.method)) [[unlikely]] {
+        return result;
+    }
+    size_t second_space = request.find(' ', first_space + 1);
+    if (second_space == std::string_view::npos) [[unlikely]] {
+        return result;
+    }
+    std::string_view raw_path = request.substr(first_space + 1, second_space - first_space - 1);
+    std::string sanitized = PathValidator::sanitize_path(raw_path);
+    if (sanitized.empty()) [[unlikely]] {
+        return result;  // Invalid path - REJECTED
+    }
+    
+    // Store sanitized path (need to store in ParsedRequest as string, not string_view)
+    result.path = sanitized;
+    
+    // Find end of line (end of version)
+    size_t line_end = request.find("\r\n", second_space);
+    if (line_end == std::string_view::npos) [[unlikely]] {
+        return result;
+    }
+    
+    result.version = request.substr(second_space + 1, line_end - second_space - 1);
+    
+    // Validate version
+    if (!HTTPValidator::is_valid_version(result.version)) [[unlikely]] {
+        return result;
+    }
+    
+    result.valid = true;
+    return result;
+}
+
+std::unordered_map<std::string_view, std::string_view> HDE::HTTPParser::parse_headers(std::string_view request) noexcept {
+    std::unordered_map<std::string_view, std::string_view> headers;
+    size_t pos = request.find("\r\n");
+    if (pos == std::string_view::npos) [[unlikely]] return headers;
+    pos += 2;
+    while (pos < request.size()) {
+        size_t line_end = request.find("\r\n", pos);
+        if (line_end == std::string_view::npos) [[unlikely]] return headers;
+        std::string_view line = request.substr(pos, line_end - pos);
+        if (line.empty()) break;
+        size_t colon = line.find(':');
+        if (colon != std::string_view::npos) {
+            std::string_view key = line.substr(0, colon);
+            std::string_view value = line.substr(colon + 1);
+            while (!value.empty() && value[0] == ' ') value.remove_prefix(1);
+            headers[key] = value;
+        }
+        pos = line_end + 2;
+    }
+    return headers;
+}
+
+void HDE::ResponseCache::load_files(const std::vector<std::pair<std::string, std::string>>& routes, quill::Logger* logger) {
+    std::unique_lock<std::shared_mutex> lock(cache_mutex);
+    for (const auto& [path, file_path] : routes) {
+        std::ifstream file(file_path, std::ios::binary);
+        if (!file.is_open()) [[unlikely]] {
+            LOG_INFO(logger, "WARNING: Cannot open file: {} for path: {}", file_path, path);
+            continue;
+        }
+        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+        std::string response = std::format(
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: {}\r\n"
+            "Connection: close\r\n"
+            "\r\n{}",
+            content.length(), content
+        );
+        cache[path] = std::move(response);
+        LOG_INFO(logger, "Cached: {} ({} bytes)", path, cache[path].length());
+    }
+    std::string not_found_html = 
+        "<!DOCTYPE html><html><body>"
+        "<h1>404 Not Found</h1>"
+        "<p>The requested page does not exist.</p>"
+        "</body></html>";
+    
+    not_found_response = std::format(
+        "HTTP/1.1 404 Not Found\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n"
+        "\r\n{}",
+        not_found_html.length(), not_found_html
+    );
+    
+    LOG_INFO(logger, "Response cache initialized with {} routes", cache.size());
+}
+
+std::string_view HDE::ResponseCache::get_response(std::string_view path) const noexcept {
+    std::shared_lock<std::shared_mutex> lock(cache_mutex);
+    auto it = cache.find(std::string(path));
+    if (it != cache.end()) [[likely]] {
+        return it -> second;
+    }
+    return not_found_response;
+}
+
+bool HDE::ResponseCache::reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger) {
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) [[unlikely]] return false;
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+    std::string response = std::format(
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"           // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                     // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"           // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
+        "\r\n{}",
+        content.length(), content
+    );
+    std::unique_lock<std::shared_mutex> lock(cache_mutex);
+    cache[path] = std::move(response);
+    LOG_INFO(logger, "Reloaded: {}", path);
+    return true;
+}
+
+std::string HDE::PathValidator::sanitize_path(std::string_view raw_path) noexcept {
+    if (raw_path.empty() || raw_path[0] != '/') [[unlikely]] {
+        return "";
+    }
+    std::string path(raw_path);
+    size_t query_pos = path.find('?');
+    if (query_pos != std::string::npos) {
+        path = path.substr(0, query_pos);
+    }
+    size_t fragment_pos = path.find('#');
+    if (fragment_pos != std::string::npos) {
+        path = path.substr(0, fragment_pos);
+    }
+    path = url_decode(path);
+    if (path.find("..") != std::string::npos) [[unlikely]] {
+        return ""; // ".." -> path traversal attempt
+    } 
+    if (path.find("//") != std::string::npos) [[unlikely]] {
+        return ""; // "//" -> suspicious
+    }
+    // Null byte injection (could truncate strings in C APIs)
+    if (path.find('\0') != std::string::npos) [[unlikely]] {
+        return "";
+    }
+    // Check for absolute path attempts
+    if (path.size() > 1 && path[1] == ':') [[unlikely]] {
+        return "";
+    }
+    // Limit path length
+    if (path.length() > 255) [[unlikely]] {
+        return "";
+    }
+    for (char c : path) {
+        if (!std::isalnum(c) && c != '/' && c != '-' && 
+            c != '_' && c != '.') [[unlikely]] {
+            return "";  // Invalid character - REJECT
+        }
+    }
+    return path;
+}
+
+std::string HDE::PathValidator::url_decode(const std::string& str) noexcept {
+    std::string result;
+    result.reserve(str.length());
+
+    for (size_t i = 0; i < str.length(); ++i) {
+        if (str[i] == '%' && i + 2 < str.length()) {
+            // Decode %XX
+            int high = hex_to_int(str[i + 1]);
+            int low = hex_to_int(str[i + 2]);
+            
+            if (high != -1 && low != -1) {
+                result += static_cast<char>((high << 4) | low);
+                i += 2;
+                continue;
+            }
+        } else if (str[i] == '+') {
+            result += ' ';
+            continue;
+        }
+        result += str[i];
+    }
+
+    return result;
+}
+
+int HDE::PathValidator::hex_to_int(char c) noexcept {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+bool HDE::HTTPValidator::is_valid_method(std::string_view method) noexcept {
+    return method == "GET" || method == "HEAD" || method == "OPTIONS";
+}
+
+bool HDE::HTTPValidator::is_valid_version(std::string_view version) noexcept {
+    return version == "HTTP/1.1" || version == "HTTP/1.0";
+}
+
+bool HDE::HTTPValidator::is_valid_request_line(std::string_view request) noexcept {
+    if (request.find("\r\n") == std::string_view::npos) [[unlikely]] {
+        return false;
+    }
+    if (request.find('\0') != std::string_view::npos) [[unlikely]] {
+        return false;
+    }
+    size_t first_line_end = request.find("\r\n");
+    size_t headers_end = request.find("\r\n\r\n");
+    // If there's content after headers without Content-Length, suspicious
+    if (headers_end != std::string_view::npos) {
+        std::string_view after_headers = request.substr(headers_end + 4);
+        if (!after_headers.empty() && 
+            request.find("Content-Length:") == std::string_view::npos) [[unlikely]] {
+            return false;  // Body without Content-Length
+        }
+    }
+    return true;
+}
+
+bool HDE::HTTPValidator::is_valid_size(size_t size) noexcept {
+    return size > 0 && size < HDE::server_config.valid_request_size_tolerance;
+}
+
 //Runs on independent thread
 void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logger) {
     std::unique_lock<std::mutex> init_lock(HDE::serverState.init_mutex);
@@ -335,12 +578,21 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
     });
     LOG_INFO(logger, "[Thread {}]: [Accepter] Initializing...", get_thread_id_cached());
     init_lock.unlock();
-    char local_buf[HDE::server_config.MAX_BUFFER_SIZE];
-    char ip_str[INET6_ADDRSTRLEN];
-    int client_socket_fd;
-    const size_t MAX_PACKET_SIZE = HDE::server_config.MAX_BUFFER_SIZE - 1;
-    int res;
-    ssize_t bytesRead;
+    #if HDE::threadsForAccepter > 1
+        #define THREAD_LOCAL thread_local
+    #else
+        #define THREAD_LOCAL
+    #endif
+    THREAD_LOCAL char local_buf[HDE::server_config.MAX_BUFFER_SIZE];
+    THREAD_LOCAL char ip_str[INET6_ADDRSTRLEN];
+    THREAD_LOCAL int client_socket_fd;
+    THREAD_LOCAL const size_t MAX_PACKET_SIZE = HDE::server_config.MAX_BUFFER_SIZE - 1;
+    THREAD_LOCAL int res;
+    THREAD_LOCAL int nodelay = 1;
+    THREAD_LOCAL ssize_t bytesRead;
+    THREAD_LOCAL struct timeval timeout;
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
     //Epoll set up, good for batching requests then process at once, but it's only good for managing hundreds/thousands of concurrent connections.
     /*#ifdef __APPLE__
         int kq = kqueue();
@@ -406,8 +658,18 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             HDE::reportErrorMessage(logger);
             continue;
         }
+        if (setsockopt(client_socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) [[unlikely]] {
+            if (HDE::server_config.log_level == FULL) {
+                LOG_INFO(logger, "[Accepter] Failed to set socket timeout");
+            }
+        }
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 2 reached.", get_thread_id_cached());
+        }
+        if (setsockopt(client_socket_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay)) < 0) {
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
+                LOG_INFO(logger, "[Thread {}]: [Accepter] Failed to set TCP_NODELAY", get_thread_id_cached());
+            }
         }
         res = getnameinfo(reinterpret_cast<struct sockaddr*>(&address), sizeof(address), ip_str, INET6_ADDRSTRLEN, nullptr, 0, NI_NUMERICHOST);
         if (res != 0) [[unlikely]] {
@@ -497,10 +759,34 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
     });
     LOG_INFO(logger, "[Thread {}]: [Handler] Initializing...", get_thread_id_cached());
     init_lock.unlock();
-    std::string temp;
-    std::string contents;
-    struct Request client;
-    size_t content_length;
+    #if HDE::threadsForHandler > 1
+        #define THREAD_LOCAL thread_local
+    #else
+        #define THREAD_LOCAL
+    #endif
+    THREAD_LOCAL std::string temp;
+    THREAD_LOCAL struct Request client;
+    static const std::string_view bad_request_response = 
+        "HTTP/1.1 400 Bad Request\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 11\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "Bad Request";
+    static const std::string_view forbidden_response = 
+        "HTTP/1.1 403 Forbidden\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 9\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "Forbidden";
+    static const std::string_view method_not_allowed_response = 
+        "HTTP/1.1 405 Method Not Allowed\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 18\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "Method Not Allowed";
     for (;;) {
         if (HDE::serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Handler] Terminating handler loop...", get_thread_id_cached());
@@ -533,47 +819,42 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
         }
         HDE::Server::logClientInfo("Handler", client.msg, logger);
         //<-- Server processing steps -->
-        {
-            //actually in the future try to implement an advanced file caching system that run on startup to avoid unnecessary operations
-            //client request is stored in client.msg
-            std::scoped_lock<std::mutex> lock(HDE::serverState.file_access_mutex);
-            std::fstream inputFile(html_file_path);
-            if (!inputFile.is_open()) [[unlikely]] {
-                LOG_INFO(logger, "FATAL: Cannot open file: {}", html_file_path);
-                exit(EXIT_FAILURE);
+        if (!HTTPValidator::is_valid_size(client.msg.length())) [[unlikely]] {
+            if (HDE::server_config.log_level != MINIMAL) {
+                LOG_INFO(logger, "[Handler] Suspicious request size: {} bytes", client.msg.length());
             }
-            temp = std::string((std::istreambuf_iterator<char>(inputFile)), std::istreambuf_iterator<char>());
-            inputFile.close();
+            responder_queue.emplace_response(client.location, bad_request_response, logger);
+            resp_in_res_queue.notify_one();
+            continue;
         }
-        content_length = temp.length();
-        contents.reserve(content_length + 100);
-        contents = std::format(
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: {}\r\n"
-            "Connection: close\r\n"
-            "\r\n{}",
-            content_length, temp
-        );
-        if (contents.empty()) [[unlikely]] {
-            LOG_INFO(logger, "FATAL: File {} is empty.", html_file_path);
-            exit(EXIT_FAILURE);
+        ParsedRequest parsed = HTTPParser::parse_request_line(client.msg);
+        if (!parsed.valid) [[unlikely]] {
+            if (HDE::server_config.log_level != MINIMAL) {
+                LOG_INFO(logger, "[Handler] Invalid/malicious request detected from fd {}", client.location);
+            }
+            responder_queue.emplace_response(client.location, bad_request_response, logger);
+            resp_in_res_queue.notify_one();
+            continue;
         }
-        if (HDE::server_config.log_level != MINIMAL) {
-            LOG_INFO(logger, "Template cache loaded: {} bytes", contents.length());
+        if (parsed.method != "GET" && parsed.method != "HEAD") [[unlikely]] {
+            if (HDE::server_config.log_level != MINIMAL) {
+                LOG_INFO(logger, "[Handler] Method not allowed: {}", parsed.method);
+            }
+            responder_queue.emplace_response(client.location, method_not_allowed_response, logger);
+            resp_in_res_queue.notify_one();
+            continue;
         }
+        if (HDE::server_config.log_level == FULL) {
+            LOG_INFO(logger, "[Thread {}]: [Handler] Valid request: {} {}", get_thread_id_cached(), parsed.method, parsed.path);
+        }
+        std::string_view response = cache.get_response(parsed.path);
+
         // <-- End server processing steps zone -->
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Handler] Checkpoint 2 reached.", get_thread_id_cached());
         }
-        {
-            //std::scoped_lock<std::mutex> lock(responder_queue_mutex); <- comment out to avoid double lock
-            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                LOG_INFO(logger, "[Thread {}]: [Handler] Acquired responder_queue_mutex", get_thread_id_cached());
-            }
-            responder_queue.emplace_response(client.location, contents, logger);
-            resp_in_res_queue.notify_one();
-        }
+        responder_queue.emplace_response(client.location, response, logger);
+        resp_in_res_queue.notify_one();
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Handler] Checkpoint 3 reached.", get_thread_id_cached());
         }
@@ -596,9 +877,14 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
     });
     LOG_INFO(logger, "[Thread {}]: [Responder] Initializing...", get_thread_id_cached());
     init_lock.unlock();
-    struct Response client;
-    const char* msg;
-    ssize_t res;
+    #if HDE::threadsForResponder > 1
+        #define THREAD_LOCAL thread_local
+    #else
+        #define THREAD_LOCAL
+    #endif
+    THREAD_LOCAL struct Response client;
+    THREAD_LOCAL const char* msg;
+    THREAD_LOCAL ssize_t res;
     for (;;) {
         if (HDE::serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] {
             LOG_INFO(logger, "[Thread {}]: [Responder] Terminating responder loop...", get_thread_id_cached());
@@ -625,7 +911,7 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
             LOG_INFO(logger, "[Thread {}]: [Responder] Received data from [Handler]. Processing...", get_thread_id_cached());
         }
         //In the future implement a loop here that keeps track of bytes being sent, then repeatedly spamming packets until remaining bytes = 0
-        res = write(client.destination, msg, client.msg.length()); //try to use an alternative write() function in the future if possible
+        res = send(client.destination, msg, client.msg.length(), MSG_NOSIGNAL);
         if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
             LOG_INFO(logger, "[Thread {}]: [Responder] Result of variable <res>: {}", get_thread_id_cached(), std::to_string(res));
         }
@@ -774,6 +1060,7 @@ void HDE::Server::launch(quill::Logger* logger) {
     } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < 10000) [[unlikely]] {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have max_responses_queue_size more than 10000, in case the amount of responses backs up during peak/extreme loads.", HDE::get_thread_id_cached());
     }
+    cache.load_files(file_routes_list, logger);
     //Configuring socket options
     int opt = 1;
     setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));

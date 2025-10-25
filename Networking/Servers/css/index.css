@@ -1,0 +1,26 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 40px;
+    background-color: #f9f9f9;
+    color: #555555;
+}
+h2 {
+    color: #333333;
+}
+ul {
+    list-style-type: none;
+    padding: 0;
+}
+li {
+    margin: 10px 0;
+}
+a {
+    text-decoration: none;
+    color: #1a73e8;
+}
+a:hover {
+    text-decoration: underline;
+}
+a:visited {
+    color: purple;
+}

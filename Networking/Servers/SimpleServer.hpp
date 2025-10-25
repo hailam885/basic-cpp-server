@@ -4,6 +4,7 @@
 #include "../hdelibc-networking.hpp"
 #include <algorithm>
 #include <arpa/inet.h>
+//#include <arpa/
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -21,6 +22,10 @@
 #include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <netinet/ip.h>
+#include <netinet/bootp.h>
 #include <thread>
 #include <pthread.h>
 #include <queue>
@@ -31,6 +36,7 @@
 #include "quill/sinks/ConsoleSink.h"
 #include "quill/std/WideString.h"
 #include <regex>
+#include <shared_mutex>
 #include <stdexcept>
 #include <stdio.h>
 #include <span>
