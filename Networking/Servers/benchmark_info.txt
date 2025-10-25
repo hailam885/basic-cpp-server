@@ -1,0 +1,106 @@
+Info:
+
+CPU: Apple M2 8-core (4 Performance @ 3.5GHz max, 4 Efficiency @ 2.8GHz max)
+16GB RAM, 100GB/s
+
+The information below is pasted directly from the console of the testing device
+
+trangtran@Mac ~ % ab -n 1000000 -c 250 http://192.168.12.109:80/
+This is ApacheBench, Version 2.3 <$Revision: 1913912 $>
+Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
+Licensed to The Apache Software Foundation, http://www.apache.org/
+
+Benchmarking 192.168.12.109 (be patient)
+Completed 100000 requests
+Completed 200000 requests
+Completed 300000 requests
+Completed 400000 requests
+Completed 500000 requests
+Completed 600000 requests
+Completed 700000 requests
+Completed 800000 requests
+Completed 900000 requests
+Completed 1000000 requests
+Finished 1000000 requests
+
+
+Server Software:        
+Server Hostname:        192.168.12.109
+Server Port:            80
+
+Document Path:          /
+Document Length:        1306 bytes
+
+Concurrency Level:      250
+Time taken for tests:   49.051 seconds
+Complete requests:      1000000
+Failed requests:        0
+Total transferred:      1391000000 bytes
+HTML transferred:       1306000000 bytes
+Requests per second:    20387.02 [#/sec] (mean)
+Time per request:       12.263 [ms] (mean)
+Time per request:       0.049 [ms] (mean, across all concurrent requests)
+Transfer rate:          27693.69 [Kbytes/sec] received
+
+Connection Times (ms)
+              min  mean[+/-sd] median   max
+Connect:        0    7  38.0      5    4010
+Processing:     2    6   5.1      5     130
+Waiting:        0    6   5.1      5     130
+Total:          4   12  38.3     11    4016
+
+Percentage of the requests served within a certain time (ms)
+  50%     11
+  66%     11
+  75%     11
+  80%     11
+  90%     12
+  95%     12
+  98%     13
+  99%     18
+ 100%   4016 (longest request)
+trangtran@Mac ~ % wrk 
+Usage: wrk <options> <url>                            
+  Options:                                            
+    -c, --connections <N>  Connections to keep open   
+    -d, --duration    <T>  Duration of test           
+    -t, --threads     <N>  Number of threads to use   
+                                                      
+    -s, --script      <S>  Load Lua script file       
+    -H, --header      <H>  Add header to request      
+        --latency          Print latency statistics   
+        --timeout     <T>  Socket/request timeout     
+    -v, --version          Print version details      
+                                                      
+  Numeric arguments may include a SI unit (1k, 1M, 1G)
+  Time arguments may include a time unit (2s, 2m, 2h)
+trangtran@Mac ~ % wrk -t6 -c200 -d30s http://192.168.12.109:80/
+Running 30s test @ http://192.168.12.109:80/
+  6 threads and 200 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.34ms    5.58ms 117.80ms   98.73%
+    Req/Sec     3.01k   769.24     4.50k    83.30%
+  277880 requests in 30.08s, 368.62MB read
+  Socket errors: connect 198, read 0, write 0, timeout 0
+Requests/sec:   9236.57
+Transfer/sec:     12.25MB
+trangtran@Mac ~ % wrk -t8 -c1000 -d60s http://192.168.12.109:80/
+Running 1m test @ http://192.168.12.109:80/
+  8 threads and 1000 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.74ms    4.74ms 113.16ms   97.74%
+    Req/Sec     2.20k   747.27     4.09k    69.22%
+  276488 requests in 1.00m, 366.78MB read
+  Socket errors: connect 1000, read 0, write 0, timeout 0
+Requests/sec:   4600.93
+Transfer/sec:      6.10MB
+trangtran@Mac ~ % wrk -t8 -c500 -d300s http://192.168.12.109:80/
+Running 5m test @ http://192.168.12.109:80/
+  8 threads and 500 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     5.74ms    4.54ms 120.04ms   98.31%
+    Req/Sec     2.23k   615.10     3.58k    73.27%
+  263432 requests in 5.00m, 349.46MB read
+  Socket errors: connect 496, read 0, write 0, timeout 0
+Requests/sec:    877.81
+Transfer/sec:      1.16MB
