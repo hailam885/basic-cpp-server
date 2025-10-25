@@ -88,12 +88,12 @@ namespace HDE {
         int queueCount = 1000000; //                    queue before being accepted, recommended 100K+
         int PORT = 80; //                               port, default to 80 is the easiest to test
         int MAX_CONNECTIONS_PER_SECOND = 40; //         connections per seconds threshold before rejecting due to possible DoS
-        int MAX_ADDRESS_QUEUE_SIZE = 50000; //          recommended 10K+, in case requests pile up during loads
-        int MAX_RESPONSES_QUEUE_SIZE = 50000; //        recommended 10K+, in case requests pile up during loads
+        int MAX_ADDRESS_QUEUE_SIZE = -1; //          recommended 10K+, in case requests pile up during loads, -1 to disable limit
+        int MAX_RESPONSES_QUEUE_SIZE = -1; //        recommended 10K+, in case requests pile up during loads, -1 to disable limit
         const size_t MAX_BUFFER_SIZE = 30721; //        size in bytes, recommended to be 30K+ bytes, avoid too high (50K+)
         enum logLevel log_level = MINIMAL; //           FULL / DEFAULT / DECREASED / MINIMAL
         bool disable_logging = true; //                Fully disables logging besides the start up and config checking logs
-
+        //backlog count are in a/Networking/Sockets/ListeningSocket.hpp, change the variable "backlog"
 
         //              [ Performance ]
 
@@ -101,7 +101,7 @@ namespace HDE {
         //Try to improve handler function efficiency. also the write() function in responder is extremely inefficient, look for faster and less overhead alternatives to the write() function.
 
         int threadsForAccepter = 2; //                  minimum 1
-        int threadsForHandler = 3; //                   minimum 1, process is computation heavy so allocate more threads
+        int threadsForHandler = 4; //                   minimum 1, process is computation heavy so allocate more threads
         int threadsForResponder = 1; //                 minimum 1
         int totalUsedThreads = threadsForAccepter + threadsForHandler + threadsForResponder;
         bool continuous_responses = true; //            true / false                halting before calling a thread, just put true

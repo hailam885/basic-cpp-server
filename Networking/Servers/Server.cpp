@@ -121,7 +121,7 @@ void HDE::AddressQueue::emplace_response(int loc, std::span<const char> data, qu
     {
         std::scoped_lock<std::mutex> lock(HDE::serverState.address_queue_mutex);
         //have a wait condition here that waits until responder queue has space
-        if (address_queue.size() < HDE::server_config.MAX_ADDRESS_QUEUE_SIZE) [[likely]] {
+        if (address_queue.size() < HDE::server_config.MAX_ADDRESS_QUEUE_SIZE || HDE::server_config.MAX_ADDRESS_QUEUE_SIZE == -1) [[likely]] {
             address_queue.emplace(loc, std::string(data.data(), data.size()));
         } else [[unlikely]] {
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) LOG_INFO(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_ADDRESS_QUEUE_SIZE);
@@ -138,7 +138,7 @@ void HDE::AddressQueue::emplace_response(const int location, const std::string_v
     {
         std::scoped_lock<std::mutex> lock(HDE::serverState.address_queue_mutex);
         //have a wait condition here that waits until responder queue has space
-        if (address_queue.size() < HDE::server_config.MAX_ADDRESS_QUEUE_SIZE) [[likely]] {
+        if (address_queue.size() < HDE::server_config.MAX_ADDRESS_QUEUE_SIZE || HDE::server_config.MAX_ADDRESS_QUEUE_SIZE == -1) [[likely]] {
             address_queue.emplace(location, msg);
         } else [[unlikely]]  {
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
@@ -225,7 +225,7 @@ bool HDE::AddressQueue::empty() const noexcept {
 void HDE::ResponderQueue::emplace_response(const int destination, const std::string_view msg, quill::Logger* logger) {
     {
         std::scoped_lock<std::mutex> lock(HDE::serverState.responder_queue_mutex);
-        if (allResponses.size() <= HDE::server_config.MAX_RESPONSES_QUEUE_SIZE) [[likely]] {
+        if (allResponses.size() <= HDE::server_config.MAX_RESPONSES_QUEUE_SIZE || HDE::server_config.MAX_RESPONSES_QUEUE_SIZE == -1) [[likely]] {
             allResponses.emplace(destination, msg);
         } else [[unlikely]] {
             //have a wait condition here that waits until responder queue has space
@@ -774,6 +774,11 @@ void HDE::Server::launch(quill::Logger* logger) {
     } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < 10000) [[unlikely]] {
         LOG_INFO(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have max_responses_queue_size more than 10000, in case the amount of responses backs up during peak/extreme loads.", HDE::get_thread_id_cached());
     }
+    //Configuring socket options
+    int opt = 1;
+    setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+    setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_RCVBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
+    setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_SNDBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
     //can totally remove, it's just the upper cap for the variables; they won't even be used anyway, they should be disabled to get max throughput
     if (HDE::server_config.handler_responses_per_second > 1000) [[unlikely]] {
         HDE::server_config.handler_responses_per_second = 1000;
