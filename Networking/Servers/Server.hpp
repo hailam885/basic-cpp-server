@@ -100,7 +100,7 @@ namespace HDE {
         //dev notes
         //Try to improve handler function efficiency. also the write() function in responder is extremely inefficient, look for faster and less overhead alternatives to the write() function.
 
-        int threadsForAccepter = 2; //                  minimum 1
+        int threadsForAccepter = 3; //                  minimum 1
         int threadsForHandler = 4; //                   minimum 1, process is computation heavy so allocate more threads
         int threadsForResponder = 1; //                 minimum 1
         int totalUsedThreads = threadsForAccepter + threadsForHandler + threadsForResponder;

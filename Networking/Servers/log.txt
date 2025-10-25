@@ -1,0 +1,132 @@
+Last login: Sat Oct 18 16:03:19 on ttys002
+trangtran@Mac ~ % cd ~   
+trangtran@Mac ~ % cd ~/
+trangtran@Mac ~ % cd ~/Desktop
+trangtran@Mac Desktop % cd coding_files/a/Networking/Servers/
+trangtran@Mac Servers % ./main
+16:04:51.450237667 [4291821] Server.cpp:334               LOG_INFO      root         Template cache loaded: 1295 bytes
+16:04:51.450435834 [4291821] Server.cpp:654               LOG_INFO      root         [Thread 0x1f38e1f40]: [Main Thread] Threads initialized.
+16:04:51.450458292 [4291823] Server.cpp:364               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Initializing...
+16:04:51.450523250 [4291823] Server.cpp:420               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Waiting for requests...
+16:04:51.450546250 [4291824] Server.cpp:364               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] Initializing...
+16:04:51.450640625 [4291824] Server.cpp:420               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] Waiting for requests...
+16:04:51.450653292 [4291825] Server.cpp:488               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Initializing...
+16:04:51.450712042 [4291825] Server.cpp:498               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Waiting for tasks...
+16:04:51.450712584 [4291825] Server.cpp:501               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Acquired address_cv_mutex
+16:04:51.450733709 [4291826] Server.cpp:488               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Initializing...
+16:04:51.450840750 [4291826] Server.cpp:498               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Waiting for tasks...
+16:04:51.450841042 [4291826] Server.cpp:501               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Acquired address_cv_mutex
+16:04:51.450861959 [4291827] Server.cpp:488               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Initializing...
+16:04:51.450921459 [4291827] Server.cpp:498               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Waiting for tasks...
+16:04:51.450921584 [4291827] Server.cpp:501               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Acquired address_cv_mutex
+16:04:51.450938875 [4291828] Server.cpp:545               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Initializing...
+16:04:51.451007667 [4291828] Server.cpp:556               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Acquired responder_cv_mutex
+16:04:51.451007750 [4291828] Server.cpp:557               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Waiting for tasks...
+16:04:51.451022250 [4291829] Server.cpp:545               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Initializing...
+16:04:51.451078709 [4291829] Server.cpp:556               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Acquired responder_cv_mutex
+16:04:51.451078875 [4291829] Server.cpp:557               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Waiting for tasks...
+16:04:52.451019625 [4291821] Server.cpp:659               LOG_INFO      root         [Thread 0x1f38e1f40]: [Main Thread] Main thread finished executing.
+16:05:01.662504833 [4291823] Server.cpp:424               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Checkpoint 1 reached.
+16:05:01.662506250 [4291824] Server.cpp:424               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] Checkpoint 1 reached.
+16:05:01.662506750 [4291824] Server.cpp:430               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] Checkpoint 2 reached.
+16:05:01.662507625 [4291823] Server.cpp:430               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Checkpoint 2 reached.
+16:05:01.662765541 [4291824] Server.cpp:440               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] Checkpoint 3 reached.
+16:05:01.662771791 [4291823] Server.cpp:440               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Checkpoint 3 reached.
+16:05:01.662776541 [4291823] Server.cpp:447               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Checkpoint 4 reached.
+16:05:01.662776583 [4291823] Server.cpp:450               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] About to acquire address_queue_mutex in .emplate_response()
+16:05:01.662788458 [4291823] Server.cpp:452               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Received data:
+16:05:01.662788458 [4291823] Server.cpp:452               LOG_INFO      root         192.168.12.109
+16:05:01.662788958 [4291823] Server.cpp:420               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Waiting for requests...
+16:05:01.662801375 [4291825] Server.cpp:508               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] (checkpoint)
+16:05:01.662803250 [4291825] Server.cpp:511               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Checkpoint 1 reached.
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] logClientInfo(): GET / HTTP/1.1\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         Host: 192.168.12.109\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         Connection: keep-alive\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         Cache-Control: max-age=0\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         DNT: 1\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         Upgrade-Insecure-Requests: 1\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         Accept-Encoding: gzip, deflate\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         Accept-Language: en-US,en;q=0.9\x0D
+16:05:01.662803291 [4291825] Server.cpp:110               LOG_INFO      root         \x0D
+16:05:01.662803458 [4291825] Server.cpp:523               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Checkpoint 2 reached.
+16:05:01.662803500 [4291825] Server.cpp:526               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Acquired responder_queue_mutex
+16:05:01.662807583 [4291825] Server.cpp:530               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Checkpoint 3 reached.
+16:05:01.662808291 [4291825] Server.cpp:498               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Waiting for tasks...
+16:05:01.662808291 [4291825] Server.cpp:501               LOG_INFO      root         [Thread 0x16d44f000]: [Handler] Acquired address_cv_mutex
+16:05:01.662814500 [4291828] Server.cpp:562               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Checkpoint 1 reached.
+16:05:01.662817000 [4291828] Server.cpp:565               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Received data from [Handler]. Processing...
+16:05:01.662828458 [4291828] Server.cpp:568               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Result of variable <res>: 1295
+16:05:01.662828750 [4291828] Server.cpp:569               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Checkpooint 2 reached.
+16:05:01.662828791 [4291828] Server.cpp:610               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Successful data transmissiont to the client.
+16:05:01.662828791 [4291828] Server.cpp:615               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Checkpoint 2 reached.
+16:05:01.662839416 [4291828] Server.cpp:622               LOG_INFO      root         ========================= Log Separator =========================
+16:05:01.662839750 [4291828] Server.cpp:556               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Acquired responder_cv_mutex
+16:05:01.662839750 [4291828] Server.cpp:557               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Waiting for tasks...
+16:05:01.750162500 [4291824] Server.cpp:447               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] Checkpoint 4 reached.
+16:05:01.750162791 [4291824] Server.cpp:450               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] About to acquire address_queue_mutex in .emplate_response()
+16:05:01.750167791 [4291824] Server.cpp:452               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] Received data:
+16:05:01.750167791 [4291824] Server.cpp:452               LOG_INFO      root         192.168.12.109
+16:05:01.750168250 [4291824] Server.cpp:420               LOG_INFO      root         [Thread 0x16d3c3000]: [Accepter] Waiting for requests...
+16:05:01.750176708 [4291826] Server.cpp:508               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] (checkpoint)
+16:05:01.750178333 [4291826] Server.cpp:511               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Checkpoint 1 reached.
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] logClientInfo(): GET /favicon.ico HTTP/1.1\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         Host: 192.168.12.109\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         Connection: keep-alive\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         DNT: 1\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         Referer: http://192.168.12.109/\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         Accept-Encoding: gzip, deflate\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         Accept-Language: en-US,en;q=0.9\x0D
+16:05:01.750178375 [4291826] Server.cpp:110               LOG_INFO      root         \x0D
+16:05:01.750178500 [4291826] Server.cpp:523               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Checkpoint 2 reached.
+16:05:01.750178541 [4291826] Server.cpp:526               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Acquired responder_queue_mutex
+16:05:01.750180875 [4291826] Server.cpp:530               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Checkpoint 3 reached.
+16:05:01.750181041 [4291826] Server.cpp:498               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Waiting for tasks...
+16:05:01.750181083 [4291826] Server.cpp:501               LOG_INFO      root         [Thread 0x16d4db000]: [Handler] Acquired address_cv_mutex
+16:05:01.750186250 [4291829] Server.cpp:562               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Checkpoint 1 reached.
+16:05:01.750187750 [4291829] Server.cpp:565               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Received data from [Handler]. Processing...
+16:05:01.750200791 [4291829] Server.cpp:568               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Result of variable <res>: 1295
+16:05:01.750200916 [4291829] Server.cpp:569               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Checkpooint 2 reached.
+16:05:01.750200958 [4291829] Server.cpp:610               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Successful data transmissiont to the client.
+16:05:01.750200958 [4291829] Server.cpp:615               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Checkpoint 2 reached.
+16:05:01.750217166 [4291829] Server.cpp:622               LOG_INFO      root         ========================= Log Separator =========================
+16:05:01.750217708 [4291829] Server.cpp:556               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Acquired responder_cv_mutex
+16:05:01.750217708 [4291829] Server.cpp:557               LOG_INFO      root         [Thread 0x16d67f000]: [Responder] Waiting for tasks...
+16:05:14.919375625 [4291823] Server.cpp:424               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Checkpoint 1 reached.
+16:05:14.919376375 [4291823] Server.cpp:430               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Checkpoint 2 reached.
+16:05:14.919382208 [4291823] Server.cpp:440               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Checkpoint 3 reached.
+16:05:14.919452000 [4291823] Server.cpp:447               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Checkpoint 4 reached.
+16:05:14.919452208 [4291823] Server.cpp:450               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] About to acquire address_queue_mutex in .emplate_response()
+16:05:14.919458000 [4291823] Server.cpp:452               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Received data:
+16:05:14.919458000 [4291823] Server.cpp:452               LOG_INFO      root         192.168.12.123
+16:05:14.919458583 [4291823] Server.cpp:420               LOG_INFO      root         [Thread 0x16d337000]: [Accepter] Waiting for requests...
+16:05:14.919472333 [4291827] Server.cpp:508               LOG_INFO      root         [Thread 0x16d567000]: [Handler] (checkpoint)
+16:05:14.919475416 [4291827] Server.cpp:511               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Checkpoint 1 reached.
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         [Thread 0x16d567000]: [Handler] logClientInfo(): GET / HTTP/1.1\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         Host: 192.168.12.109\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         Upgrade-Insecure-Requests: 1\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         Accept-Language: en-US,en;q=0.9\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         Priority: u=0, i\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         Accept-Encoding: gzip, deflate\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         Connection: keep-alive\x0D
+16:05:14.919475500 [4291827] Server.cpp:110               LOG_INFO      root         \x0D
+16:05:14.919475875 [4291827] Server.cpp:523               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Checkpoint 2 reached.
+16:05:14.919475916 [4291827] Server.cpp:526               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Acquired responder_queue_mutex
+16:05:14.919479958 [4291827] Server.cpp:530               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Checkpoint 3 reached.
+16:05:14.919480125 [4291827] Server.cpp:498               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Waiting for tasks...
+16:05:14.919480166 [4291827] Server.cpp:501               LOG_INFO      root         [Thread 0x16d567000]: [Handler] Acquired address_cv_mutex
+16:05:14.919485333 [4291828] Server.cpp:562               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Checkpoint 1 reached.
+16:05:14.919485916 [4291828] Server.cpp:565               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Received data from [Handler]. Processing...
+16:05:14.919541541 [4291828] Server.cpp:568               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Result of variable <res>: 1295
+16:05:14.919541875 [4291828] Server.cpp:569               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Checkpooint 2 reached.
+16:05:14.919541875 [4291828] Server.cpp:610               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Successful data transmissiont to the client.
+16:05:14.919541916 [4291828] Server.cpp:615               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Checkpoint 2 reached.
+16:05:14.919566625 [4291828] Server.cpp:622               LOG_INFO      root         ========================= Log Separator =========================
+16:05:14.919567583 [4291828] Server.cpp:556               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Acquired responder_cv_mutex
+16:05:14.919567583 [4291828] Server.cpp:557               LOG_INFO      root         [Thread 0x16d5f3000]: [Responder] Waiting for tasks...
+^C
