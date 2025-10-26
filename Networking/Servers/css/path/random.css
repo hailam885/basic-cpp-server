@@ -1,0 +1,126 @@
+body {
+    transition: background-color 0.3s, color 0.3s;
+    background-color: white;
+    color: #222;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.dark-mode {
+    background-color: #181820;
+    color: #fafafa;
+}
+
+.container {
+    max-width: 650px;
+    margin: 60px auto;
+    padding: 30px 40px;
+    border-radius: 16px;
+    box-shadow: 0 0 20px rgba(50, 50, 50, 0.07);
+    background: rgba(255, 255, 255, 0.89);
+}
+
+.dark-mode .container {
+    background: rgba(34, 40, 55, 0.89);
+    box-shadow: 0 0 28px rgba(0, 0, 0, 0.17);
+}
+
+h1 {
+    letter-spacing: 1px;
+    font-size: 2rem;
+}
+
+.links {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 32px;
+}
+
+.link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px 12px;
+    background: #eaf1fa;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(50, 50, 50, 0.04);
+    text-decoration: none;
+    color: #1a2e57;
+    font-weight: 500;
+    font-size: 1rem;
+    transition: background 0.2s, color 0.2s;
+}
+
+.dark-mode .link {
+    background: #292744;
+    color: #e0e0ff;
+}
+
+.link:hover {
+    background: #c5e8ff;
+    color: #0b2147;
+}
+
+.dark-mode .link:hover {
+    background: #454273;
+    color: #b1b7ff;
+}
+
+.toggle-btn {
+    float: right;
+    margin: -18px -10px 10px 0;
+    background: #eaf1fa;
+    border: none;
+    border-radius: 24px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 1rem;
+    color: #444;
+    box-shadow: 0 1px 5px rgba(60, 60, 60, 0.07);
+    transition: background 0.2s, color 0.2s;
+}
+
+.dark-mode .toggle-btn {
+    background: #292744;
+    color: #fafafa;
+}
+
+.home-btn {
+    position: fixed;
+    display: inline-block;
+    top: 18px;
+    left: 18px;
+    background: #eaf1fa;
+    color: #1a2e57; 
+    padding: 10px 22px;
+    border-radius: 7px;
+    text-decoration: none;
+    font-weight: 600;
+    box-shadow: 0 2px 9px rgba(60, 60, 60, 0.05);
+    transition: background 0.2s, color 0.2s;
+    z-index: 999;
+}
+
+.dark-mode .home-btn {
+    background: #292744;
+    color: #e0e0ff;
+}
+
+.home-btn:hover {
+    background: #c5e8ff;
+    color: #0b2147;
+}
+
+.dark-mode .home-btn:hover {
+    background: #454273;
+    color: #b1b7ff;
+}
+
+.footer-text {
+    text-align: center;
+    margin-top: 40px;
+    font-size: 0.9rem;
+    color: #a6a5a5;
+}

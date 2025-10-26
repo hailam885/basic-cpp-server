@@ -1,0 +1,128 @@
+function addLog(message, type = 'info') {
+    const logContainer = document.getElementById('log-container');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    const timestamp = new Date().toLocaleTimeString();
+    entry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+    logContainer.insertBefore(entry, logContainer.firstChild);
+    // Keep only last 50 entries
+    while (logContainer.children.length > 100) {
+        logContainer.removeChild(logContainer.lastChild);
+    }
+}
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    if (bytes < 1024 * 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    return (bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2) + ' TB';
+}
+function formatUptime(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    if (mins > 0) return `${mins}m ${secs}s`;
+    return `${secs}s`;
+}
+async function updateMetrics() {
+    try {
+        const response = await fetch('/admin/metrics');
+        if (!response.ok) throw new Error('Failed to fetch metrics');
+        const metrics = await response.json();
+        document.getElementById('uptime').textContent = formatUptime(metrics.uptime_seconds);
+        document.getElementById('total-requests').textContent = metrics.total_requests.toLocaleString();
+        document.getElementById('req-per-sec').textContent = metrics.requests_per_second.toFixed(2);
+        const successRate = metrics.total_requests > 0 ? (metrics.successful_requests / metrics.total_requests * 100).toFixed(1) : 100;
+        document.getElementById('success-rate').textContent = successRate + '%';
+        document.getElementById('bytes-sent').textContent = formatBytes(metrics.bytes_sent);
+        document.getElementById('bytes-received').textContent = formatBytes(metrics.bytes_received);
+    } catch (error) {
+        console.error('Error fetching metrics:', error);
+        addLog('Failed to update metrics', 'error');
+    }
+}
+
+async function reloadCache() {
+    if (!confirm('Reload all cached files? This will reload files from disk.')) return;
+    addLog('Reloading cache...', 'info');
+    try {
+        const response = await fetch('/admin/cache/reload', { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to reload cache');
+        const result = await response.json();
+        addLog(`Cache reloaded: ${result.files_loaded} files`, 'success');
+    } catch (error) {
+        addLog('Failed to reload cache', 'error');
+        console.error(error.name + error.message);
+    }
+}
+async function clearCache() {
+    if (!confirm('Clear all cached files? This will require a cache reload.')) return;
+    addLog('Clearing cache...', 'warning');
+    try {
+        const response = await fetch('/admin/cache/clear', { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to clear cache');
+        addLog('Cache cleared successfully', 'success');
+    } catch (error) {
+        addLog('Failed to clear cache', 'error');
+    }
+}
+async function exportMetrics() {
+    try {
+        const response = await fetch('/admin/metrics');
+        const metrics = await response.json();
+        const dataStr = JSON.stringify(metrics, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `server-metrics-${Date.now()}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        addLog('Metrics exported successfully', 'success');
+    } catch (error) {
+        addLog('Failed to export metrics', 'error');
+    }
+}
+async function shutdownServer() {
+    const password = prompt('Enter admin password to shutdown server:');
+    if (!password) return;
+    if (!confirm('⚠️ Are you ABSOLUTELY SURE you want to shutdown the server? This cannot be undone!')) {
+        return;
+    }
+    addLog('Initiating graceful shutdown...', 'error');
+    const statusBadge = document.getElementById('server-status');
+    statusBadge.innerHTML = '<span class="status-dot" style="background:#ef4444"></span><span>SHUTTING DOWN</span>';
+    statusBadge.style.background = 'rgba(239, 68, 68, 0.1)';
+    statusBadge.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+    statusBadge.style.color = '#ef4444';
+    try {
+        const response = await fetch('/admin/shutdown', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ password: password })
+        });
+        if (!response.ok) {
+            throw new Error('Shutdown failed - incorrect password?');
+        }
+        addLog('Server shutdown initiated', 'error');
+        clearInterval(refreshInterval);
+        setTimeout(() => {
+            statusBadge.innerHTML = '<span class="status-dot" style="background:#64748b"></span><span>OFFLINE</span>';
+            addLog('Server is now offline', 'error');
+        }, 1000);
+    } catch (error) {
+        addLog('Shutdown failed: ' + error.message, 'error');
+        statusBadge.innerHTML = '<span class="status-dot"></span><span>ONLINE</span>';
+        statusBadge.style.background = 'rgba(16, 185, 129, 0.1)';
+        statusBadge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+        statusBadge.style.color = '#10b981';
+    }
+}
+let refreshInterval;
+updateMetrics();
+refreshInterval = setInterval(updateMetrics, 1000);

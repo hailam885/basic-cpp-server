@@ -105,14 +105,14 @@ inline void HDE::Server::logClientInfo(const std::string_view processing_compone
 inline void HDE::reportErrorMessage(quill::Logger* logger) {
     int error_code = errno;
     if (HDE::server_config.log_level != MINIMAL) {
-        LOG_INFO(logger, "[Thread {}]: An error has occured (Description, if any, line above).", get_thread_id_cached());
+        LOG_ERROR(logger, "[Thread {}]: An error has occured (Description, if any, line above).", get_thread_id_cached());
     }
     if (errno == EINTR) [[unlikely]] {
-        if (HDE::server_config.log_level != MINIMAL) LOG_INFO(logger, "[Thread {}]: Message: A possible interrupted system call is detected.", get_thread_id_cached());
+        if (HDE::server_config.log_level != MINIMAL) LOG_ERROR(logger, "[Thread {}]: Message: A possible interrupted system call is detected.", get_thread_id_cached());
     } else if (errno == EMFILE || errno == ENFILE) [[unlikely]] {
-        if (HDE::server_config.log_level != MINIMAL) LOG_INFO(logger, "[Thread {}]: Message: The server is using a lot of resources (Too many open files). Check immediately.", get_thread_id_cached());
+        if (HDE::server_config.log_level != MINIMAL) LOG_ERROR(logger, "[Thread {}]: Message: The server is using a lot of resources (Too many open files). Check immediately.", get_thread_id_cached());
     } else if (HDE::server_config.log_level != MINIMAL) [[likely]] {
-        LOG_INFO(logger, "[Thread {}]: Message: {}", get_thread_id_cached(), strerror(errno));
+        LOG_ERROR(logger, "[Thread {}]: Message: {}", get_thread_id_cached(), strerror(errno));
     } else return;
 }
 //Thread-safe, do not lock address_queue_mutex within the same scope of the function
@@ -124,7 +124,9 @@ void HDE::AddressQueue::emplace_response(int loc, std::span<const char> data, qu
         if (address_queue.size() < HDE::server_config.MAX_ADDRESS_QUEUE_SIZE || HDE::server_config.MAX_ADDRESS_QUEUE_SIZE == -1) [[likely]] {
             address_queue.emplace(loc, std::string(data.data(), data.size()));
         } else [[unlikely]] {
-            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) LOG_INFO(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_ADDRESS_QUEUE_SIZE);
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
+                LOG_NOTICE(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_ADDRESS_QUEUE_SIZE);
+            }
             return;
         }
         //while (true) {
@@ -142,8 +144,9 @@ void HDE::AddressQueue::emplace_response(const int location, const std::string_v
             address_queue.emplace(location, msg);
         } else [[unlikely]]  {
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                LOG_INFO(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_ADDRESS_QUEUE_SIZE);
-            } else return;
+                LOG_NOTICE(logger, "[Thread {}]: Rejecting client due to incoming_address_queue_size overflow. Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_ADDRESS_QUEUE_SIZE);
+            }
+            return;
         }
     }
     addr_in_addr_queue.notify_one();
@@ -230,7 +233,7 @@ void HDE::ResponderQueue::emplace_response(const int destination, const std::str
         } else [[unlikely]] {
             //have a wait condition here that waits until responder queue has space
             if (HDE::server_config.log_level != MINIMAL) {
-                LOG_INFO(logger, "[Thread {}]: Rejecting client due to max_responses_queue_size overflow; Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_RESPONSES_QUEUE_SIZE);
+                LOG_NOTICE(logger, "[Thread {}]: Rejecting client due to max_responses_queue_size overflow; Overflow limit: {} clients.", get_thread_id_cached(), HDE::server_config.MAX_RESPONSES_QUEUE_SIZE);
             }
         }
         return;
@@ -327,50 +330,28 @@ bool HDE::is_rate_limited(std::string_view client_ip) {
     return false;
 }
 
-ParsedRequest HDE::HTTPParser::parse_request_line(std::string_view request) noexcept {
+inline ParsedRequest HDE::HTTPParser::parse_request_line(std::string_view request) noexcept {
     ParsedRequest result;
-    if (!HTTPValidator::is_valid_request_line(request)) [[unlikely]] {
-        return result;  // result.valid = false
-    }
+    if (!HTTPValidator::is_valid_request_line(request)) [[unlikely]] return result; // result.valid = false
     size_t first_space = request.find(' ');
-    if (first_space == std::string_view::npos || first_space == 0) [[unlikely]] {
-        return result;
-    }
+    if (first_space == std::string_view::npos || first_space == 0) [[unlikely]] return result;
     result.method = request.substr(0, first_space);
-    if (!HTTPValidator::is_valid_method(result.method)) [[unlikely]] {
-        return result;
-    }
+    if (!HTTPValidator::is_valid_method(result.method)) [[unlikely]] return result;
     size_t second_space = request.find(' ', first_space + 1);
-    if (second_space == std::string_view::npos) [[unlikely]] {
-        return result;
-    }
+    if (second_space == std::string_view::npos) [[unlikely]] return result;
     std::string_view raw_path = request.substr(first_space + 1, second_space - first_space - 1);
     std::string sanitized = PathValidator::sanitize_path(raw_path);
-    if (sanitized.empty()) [[unlikely]] {
-        return result;  // Invalid path - REJECTED
-    }
-    
-    // Store sanitized path (need to store in ParsedRequest as string, not string_view)
+    if (sanitized.empty()) [[unlikely]] return result; //invalid path
     result.path = sanitized;
-    
-    // Find end of line (end of version)
     size_t line_end = request.find("\r\n", second_space);
-    if (line_end == std::string_view::npos) [[unlikely]] {
-        return result;
-    }
-    
+    if (line_end == std::string_view::npos) [[unlikely]] return result;
     result.version = request.substr(second_space + 1, line_end - second_space - 1);
-    
-    // Validate version
-    if (!HTTPValidator::is_valid_version(result.version)) [[unlikely]] {
-        return result;
-    }
-    
+    if (!HTTPValidator::is_valid_version(result.version)) [[unlikely]] return result;
     result.valid = true;
     return result;
 }
 
-std::unordered_map<std::string_view, std::string_view> HDE::HTTPParser::parse_headers(std::string_view request) noexcept {
+inline std::unordered_map<std::string_view, std::string_view> HDE::HTTPParser::parse_headers(std::string_view request) noexcept {
     std::unordered_map<std::string_view, std::string_view> headers;
     size_t pos = request.find("\r\n");
     if (pos == std::string_view::npos) [[unlikely]] return headers;
@@ -392,55 +373,86 @@ std::unordered_map<std::string_view, std::string_view> HDE::HTTPParser::parse_he
     return headers;
 }
 
-void HDE::ResponseCache::load_files(const std::vector<std::pair<std::string, std::string>>& routes, quill::Logger* logger) {
-    std::unique_lock<std::shared_mutex> lock(cache_mutex);
-    for (const auto& [path, file_path] : routes) {
-        std::ifstream file(file_path, std::ios::binary);
-        if (!file.is_open()) [[unlikely]] {
-            LOG_INFO(logger, "WARNING: Cannot open file: {} for path: {}", file_path, path);
-            continue;
-        }
-        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        file.close();
-        std::string response = std::format(
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: {}\r\n"
-            "Connection: close\r\n"
-            "\r\n{}",
-            content.length(), content
-        );
-        cache[path] = std::move(response);
-        LOG_INFO(logger, "Cached: {} ({} bytes)", path, cache[path].length());
-    }
-    std::string not_found_html = 
-        "<!DOCTYPE html><html><body>"
-        "<h1>404 Not Found</h1>"
-        "<p>The requested page does not exist.</p>"
-        "</body></html>";
-    
-    not_found_response = std::format(
-        "HTTP/1.1 404 Not Found\r\n"
-        "Content-Type: text/html\r\n"
+inline std::optional<std::string> HDE::ResponseCache::load_file_response(const std::string& file_path) const {
+    /*
+    //use this to determine file type:
+    size_t dot_pos = path.rfind('.');
+    if (dot_pos == std::string_view::npos) return "application/octet-stream";
+    std::string_view ext = path.substr(dot_pos);
+    //chain of ifs to determine filetype:
+    if (ext == css) ... if (ext == html || ext == htm) ...
+    (at the end) -> no specific file type, application filetype
+
+    //use for images/font/etc (binary files)
+    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+    auto size = file.tellg();
+    file.seekg(0);
+
+    std::string content;
+    content.resize(size);
+    file.read(content.data(), size); //potentially set this to a variable then return
+    file.close();
+    */
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) return std::nullopt;
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+    std::string_view content_type = get_content_type(file_path);
+    return std::format(
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: {}\r\n"
         "Content-Length: {}\r\n"
         "Connection: close\r\n"
+        "Cache-Control: public, max-age=3600\r\n"
         "\r\n{}",
-        not_found_html.length(), not_found_html
+        content_type, content.length(), content
     );
-    
-    LOG_INFO(logger, "Response cache initialized with {} routes", cache.size());
 }
 
-std::string_view HDE::ResponseCache::get_response(std::string_view path) const noexcept {
+inline void HDE::ResponseCache::load_static_files(const std::vector<std::pair<std::string, std::string>>& routes, quill::Logger* logger) {
+    std::unique_lock<std::shared_mutex> lock(cache_mutex);
+    loaded_routes = routes;
+    for (const auto& [url_path, file_path] : routes) {
+        auto response_opt = load_file_response(file_path);
+        if (!response_opt.has_value()) [[unlikely]] {
+            LOG_ERROR(logger, "WARNING: Cannot load file: {} for URL: {}", file_path, url_path);
+            continue;
+        } 
+        cache[url_path] = std::move(response_opt.value());
+        LOG_INFO(logger, "Mapped: {} → {} ({} bytes)", url_path, file_path, cache[url_path].length());
+    }
+    
+    create_404_response();
+    LOG_INFO(logger, "Loaded {} custom routes", cache.size());
+}
+
+inline std::string_view HDE::ResponseCache::get_response(std::string_view path) const noexcept {
     std::shared_lock<std::shared_mutex> lock(cache_mutex);
+    // 1. Try exact path match first
     auto it = cache.find(std::string(path));
     if (it != cache.end()) [[likely]] {
-        return it -> second;
+        return it->second;
     }
+    // 2. If path is "/", try "/index.html"
+    if (path == "/") [[unlikely]] {
+        it = cache.find("/index.html");
+        if (it != cache.end()) {
+            return it->second;
+        }
+    }
+    // 3. If path is directory (ends with /), try appending "index.html"
+    if (path.size() > 1 && path.back() == '/') [[unlikely]] {
+        std::string index_path = std::string(path) + "index.html";
+        it = cache.find(index_path);
+        if (it != cache.end()) {
+            return it->second;
+        }
+    }
+    // 4. Return 404
     return not_found_response;
 }
 
-bool HDE::ResponseCache::reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger) {
+inline bool HDE::ResponseCache::reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger) {
     std::ifstream file(file_path, std::ios::binary);
     if (!file.is_open()) [[unlikely]] return false;
     std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -464,57 +476,159 @@ bool HDE::ResponseCache::reload_file(const std::string& path, const std::string&
     return true;
 }
 
-std::string HDE::PathValidator::sanitize_path(std::string_view raw_path) noexcept {
-    if (raw_path.empty() || raw_path[0] != '/') [[unlikely]] {
-        return "";
-    }
-    std::string path(raw_path);
-    size_t query_pos = path.find('?');
-    if (query_pos != std::string::npos) {
-        path = path.substr(0, query_pos);
-    }
-    size_t fragment_pos = path.find('#');
-    if (fragment_pos != std::string::npos) {
-        path = path.substr(0, fragment_pos);
-    }
-    path = url_decode(path);
-    if (path.find("..") != std::string::npos) [[unlikely]] {
-        return ""; // ".." -> path traversal attempt
-    } 
-    if (path.find("//") != std::string::npos) [[unlikely]] {
-        return ""; // "//" -> suspicious
-    }
-    // Null byte injection (could truncate strings in C APIs)
-    if (path.find('\0') != std::string::npos) [[unlikely]] {
-        return "";
-    }
-    // Check for absolute path attempts
-    if (path.size() > 1 && path[1] == ':') [[unlikely]] {
-        return "";
-    }
-    // Limit path length
-    if (path.length() > 255) [[unlikely]] {
-        return "";
-    }
-    for (char c : path) {
-        if (!std::isalnum(c) && c != '/' && c != '-' && 
-            c != '_' && c != '.') [[unlikely]] {
-            return "";  // Invalid character - REJECT
+inline std::string_view HDE::ResponseCache::get_content_type(std::string_view path) noexcept {
+    size_t dot_pos = path.rfind('.');
+    if (dot_pos == std::string_view::npos) return "application/octet-stream";
+    std::string_view ext = path.substr(dot_pos);
+    if (ext == ".html" || ext == ".htm") return "text/html; charset=utf-8";
+    if (ext == ".css") return "text/css; charset=utf-8";
+    if (ext == ".js") return "application/javascript; charset=utf-8";
+    if (ext == ".json") return "application/json; charset=utf-8";
+    if (ext == ".xml") return "application/xml; charset=utf-8";
+    if (ext == ".png") return "image/png";
+    if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+    if (ext == ".gif") return "image/gif";
+    if (ext == ".svg") return "image/svg+xml";
+    if (ext == ".webp") return "image/webp";
+    if (ext == ".ico") return "image/x-icon";
+    if (ext == ".woff") return "font/woff";
+    if (ext == ".woff2") return "font/woff2";
+    if (ext == ".ttf") return "font/ttf";
+    if (ext == ".otf") return "font/otf";
+    if (ext == ".pdf") return "application/pdf";
+    if (ext == ".zip") return "application/zip";
+    if (ext == ".txt") return "text/plain; charset=utf-8";
+    return "application/octet-stream";
+}
+
+constexpr inline void HDE::ResponseCache::create_404_response() {
+    std::string not_found_html = 
+        "<!DOCTYPE html><html><head><title>404 Not Found</title></head>"
+        "<body><h1>404 Not Found</h1>"
+        "<p>The requested resource does not exist.</p></body></html>";
+    
+    not_found_response = std::format(
+        "HTTP/1.1 404 Not Found\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n"
+        "\r\n{}",
+        not_found_html.length(), not_found_html
+    );
+}
+
+inline size_t HDE::ResponseCache::reload_all_files(quill::Logger* logger) {
+    std::unique_lock<std::shared_mutex> lock(cache_mutex);
+    size_t count = 0;
+    for (const auto& [url_path, file_path] : loaded_routes) {
+        auto response_opt = load_file_response(file_path);
+        if (response_opt.has_value()) {
+            cache[url_path] = std::move(response_opt.value());
+            count++;
+            LOG_INFO(logger, "Reloaded: {}", url_path);
         }
     }
+    return count;
+}
+
+inline void HDE::ResponseCache::clear_cache() {
+    std::unique_lock<std::shared_mutex> lock(cache_mutex);
+    cache.clear();
+    create_404_response();
+}
+inline size_t HDE::ResponseCache::get_cache_size() const {
+    std::shared_lock<std::shared_mutex> lock(cache_mutex);
+    return cache.size();
+}
+
+inline void HDE::ServerMetrics::record_request(bool success, size_t bytes_in, size_t bytes_out) {
+    total_requests.fetch_add(1, std::memory_order_relaxed);
+    if (success) {
+        successful_requests.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        failed_requests.fetch_add(1, std::memory_order_relaxed);
+    }
+    bytes_received.fetch_add(bytes_in, std::memory_order_relaxed);
+    bytes_sent.fetch_add(bytes_out, std::memory_order_relaxed);
+}
+
+inline std::string HDE::ServerMetrics::get_metrics_json() const {
+    auto uptime_seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
+    uint64_t total = total_requests.load(std::memory_order_relaxed);
+    uint64_t success = successful_requests.load(std::memory_order_relaxed);
+    uint64_t failed = failed_requests.load(std::memory_order_relaxed);
+    uint64_t bytes_in = bytes_received.load(std::memory_order_relaxed);
+    uint64_t bytes_out = bytes_sent.load(std::memory_order_relaxed);
+    double req_per_sec = uptime_seconds > 0 ? static_cast<double>(total) / uptime_seconds : 0.0; //change the implementation; it displays the mean overtime, not the quite current requests per second
+    return std::format(
+        "{{\n"
+        "  \"uptime_seconds\": {},\n"
+        "  \"total_requests\": {},\n"
+        "  \"successful_requests\": {},\n"
+        "  \"failed_requests\": {},\n"
+        "  \"bytes_received\": {},\n"
+        "  \"bytes_sent\": {},\n"
+        "  \"requests_per_second\": {:.2f},\n"
+        "  \"cache_size\": {},\n"
+        "  \"thread_count\": {}\n"
+        "}}",
+        uptime_seconds, total, success, failed, bytes_in, bytes_out, req_per_sec, 0, HDE::server_config.totalUsedThreads
+    );
+}
+
+inline bool HDE::AdminAuth::check_auth(std::string_view auth_header) {
+    if (auth_header.empty()) return false;
+    if (!auth_header.starts_with("Basic ")) return false;
+    std::string_view encoded = auth_header.substr(6);
+    std::string decoded = base64_decode(encoded);
+    size_t colon = decoded.find(':');
+    if (colon == std::string::npos) return false;
+    std::string password = decoded.substr(colon + 1);
+    return password == admin_config.admin_password;
+}
+
+inline std::string HDE::AdminAuth::base64_decode(std::string_view encoded) {
+    static const std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string decoded;
+    std::vector<int> vec(256, -1);
+    for (int i = 0; i < 64; i++) vec[base64_chars[i]] = i;
+    int val = 0, bits = -8;
+    for (unsigned char c : encoded) {
+        if (vec[c] == -1) break;
+        val = (val << 6) + vec[c];
+        bits += 6;
+        if (bits >= 0) {
+            decoded.push_back(char((val >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+    return decoded;
+}
+
+inline std::string HDE::PathValidator::sanitize_path(std::string_view raw_path) noexcept {
+    if (raw_path.empty() || raw_path[0] != '/') [[unlikely]] return "";
+    std::string path(raw_path);
+    size_t query_pos = path.find('?');
+    if (query_pos != std::string::npos) path = path.substr(0, query_pos);
+    size_t fragment_pos = path.find('#');
+    if (fragment_pos != std::string::npos) path = path.substr(0, fragment_pos);
+    path = url_decode(path);
+    if (path.find("..") != std::string::npos) [[unlikely]] return "";
+    if (path.find("//") != std::string::npos) [[unlikely]] return "";
+    if (path.find('\0') != std::string::npos) [[unlikely]] return ""; // Null byte injection (could truncate strings in C APIs)
+    if (path.size() > 1 && path[1] == ':') [[unlikely]] return ""; // Check for absolute path attempts
+    if (path.length() > 2048) [[unlikely]] return ""; // Limit path length
+    for (char c : path) if (!std::isalnum(c) && c != '/' && c != '-' && c != '_' && c != '.') [[unlikely]] return ""; // Invalid character - REJECT
     return path;
 }
 
-std::string HDE::PathValidator::url_decode(const std::string& str) noexcept {
+inline std::string HDE::PathValidator::url_decode(const std::string& str) noexcept {
     std::string result;
     result.reserve(str.length());
-
     for (size_t i = 0; i < str.length(); ++i) {
         if (str[i] == '%' && i + 2 < str.length()) {
-            // Decode %XX
             int high = hex_to_int(str[i + 1]);
             int low = hex_to_int(str[i + 2]);
-            
             if (high != -1 && low != -1) {
                 result += static_cast<char>((high << 4) | low);
                 i += 2;
@@ -526,47 +640,39 @@ std::string HDE::PathValidator::url_decode(const std::string& str) noexcept {
         }
         result += str[i];
     }
-
     return result;
 }
 
-int HDE::PathValidator::hex_to_int(char c) noexcept {
+inline int HDE::PathValidator::hex_to_int(char c) noexcept {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     return -1;
 }
 
-bool HDE::HTTPValidator::is_valid_method(std::string_view method) noexcept {
-    return method == "GET" || method == "HEAD" || method == "OPTIONS";
+inline bool HDE::HTTPValidator::is_valid_method(std::string_view method) noexcept {
+    return method == "GET" || method == "HEAD" || method == "OPTIONS" || method == "POST";
 }
 
-bool HDE::HTTPValidator::is_valid_version(std::string_view version) noexcept {
+inline bool HDE::HTTPValidator::is_valid_version(std::string_view version) noexcept {
     return version == "HTTP/1.1" || version == "HTTP/1.0";
 }
 
-bool HDE::HTTPValidator::is_valid_request_line(std::string_view request) noexcept {
-    if (request.find("\r\n") == std::string_view::npos) [[unlikely]] {
-        return false;
-    }
-    if (request.find('\0') != std::string_view::npos) [[unlikely]] {
-        return false;
-    }
+inline bool HDE::HTTPValidator::is_valid_request_line(std::string_view request) noexcept {
+    if (request.find("\r\n") == std::string_view::npos) [[unlikely]] return false;
+    if (request.find('\0') != std::string_view::npos) [[unlikely]] return false;
     size_t first_line_end = request.find("\r\n");
     size_t headers_end = request.find("\r\n\r\n");
     // If there's content after headers without Content-Length, suspicious
     if (headers_end != std::string_view::npos) {
         std::string_view after_headers = request.substr(headers_end + 4);
-        if (!after_headers.empty() && 
-            request.find("Content-Length:") == std::string_view::npos) [[unlikely]] {
-            return false;  // Body without Content-Length
-        }
+        if (!after_headers.empty() && request.find("Content-Length:") == std::string_view::npos) [[unlikely]] return false;
     }
     return true;
 }
 
-bool HDE::HTTPValidator::is_valid_size(size_t size) noexcept {
-    return size > 0 && size < HDE::server_config.valid_request_size_tolerance;
+inline bool HDE::HTTPValidator::is_valid_size(size_t size) noexcept {
+    return size >= 0 && size <= 65536;
 }
 
 //Runs on independent thread
@@ -576,22 +682,17 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
     finish_initialization.wait(init_lock, [] {
         return HDE::serverState.finished_initialization.load(std::memory_order_acquire);
     });
-    LOG_INFO(logger, "[Thread {}]: [Accepter] Initializing...", get_thread_id_cached());
+    LOG_NOTICE(logger, "[Thread {}]: [Accepter] Initializing...", get_thread_id_cached());
     init_lock.unlock();
-    #if HDE::threadsForAccepter > 1
-        #define THREAD_LOCAL thread_local
-    #else
-        #define THREAD_LOCAL
-    #endif
-    THREAD_LOCAL char local_buf[HDE::server_config.MAX_BUFFER_SIZE];
-    THREAD_LOCAL char ip_str[INET6_ADDRSTRLEN];
-    THREAD_LOCAL int client_socket_fd;
-    THREAD_LOCAL const size_t MAX_PACKET_SIZE = HDE::server_config.MAX_BUFFER_SIZE - 1;
-    THREAD_LOCAL int res;
-    THREAD_LOCAL int nodelay = 1;
-    THREAD_LOCAL ssize_t bytesRead;
-    THREAD_LOCAL struct timeval timeout;
-    timeout.tv_sec = 5;
+    char local_buf[HDE::server_config.MAX_BUFFER_SIZE];
+    thread_local char ip_str[INET6_ADDRSTRLEN];
+    thread_local int client_socket_fd;
+    thread_local const size_t MAX_PACKET_SIZE = HDE::server_config.MAX_BUFFER_SIZE - 1;
+    thread_local int res;
+    thread_local int nodelay = 1;
+    thread_local ssize_t bytesRead;
+    thread_local struct timeval timeout;
+    timeout.tv_sec = 5; //wait 5 seconds for client to send a response, closes when unresponsive
     timeout.tv_usec = 0;
     //Epoll set up, good for batching requests then process at once, but it's only good for managing hundreds/thousands of concurrent connections.
     /*#ifdef __APPLE__
@@ -651,30 +752,30 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
         struct sockaddr_in address = get_socket() -> get_address();
         client_socket_fd = accept(get_socket() -> get_sock(), reinterpret_cast<struct sockaddr*>(&address), reinterpret_cast<socklen_t*>(&addrlen));
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 1 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Accepter] Checkpoint 1 reached.", get_thread_id_cached());
         }
         if (client_socket_fd < 0) [[unlikely]] {
-            if (HDE::server_config.log_level != MINIMAL) LOG_INFO(logger, "[Thread {}]: [Accepter] A client cannot connect to the server.", get_thread_id_cached());
+            if (HDE::server_config.log_level != MINIMAL) LOG_ERROR(logger, "[Thread {}]: [Accepter] A client cannot connect to the server.", get_thread_id_cached());
             HDE::reportErrorMessage(logger);
             continue;
         }
         if (setsockopt(client_socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) [[unlikely]] {
             if (HDE::server_config.log_level == FULL) {
-                LOG_INFO(logger, "[Accepter] Failed to set socket timeout");
+                LOG_NOTICE(logger, "[Accepter] Failed to set socket timeout");
             }
         }
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 2 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Accepter] Checkpoint 2 reached.", get_thread_id_cached());
         }
-        if (setsockopt(client_socket_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay)) < 0) {
+        if (setsockopt(client_socket_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay)) < 0) { //send packets immediately when available configuration
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                LOG_INFO(logger, "[Thread {}]: [Accepter] Failed to set TCP_NODELAY", get_thread_id_cached());
+                LOG_NOTICE(logger, "[Thread {}]: [Accepter] Failed to set TCP_NODELAY", get_thread_id_cached());
             }
         }
         res = getnameinfo(reinterpret_cast<struct sockaddr*>(&address), sizeof(address), ip_str, INET6_ADDRSTRLEN, nullptr, 0, NI_NUMERICHOST);
         if (res != 0) [[unlikely]] {
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                LOG_INFO(logger, "[Thread {}]: [Accepter] A client has an unknown IP address. The server will attempt to close the connection; and shuts it down if that fails.", get_thread_id_cached());
+                LOG_NOTICE(logger, "[Thread {}]: [Accepter] A client has an unknown IP address. The server will attempt to close the connection; and shuts it down if that fails.", get_thread_id_cached());
             }
             HDE::reportErrorMessage(logger);
             if (close(client_socket_fd) < 0) [[unlikely]] {
@@ -683,11 +784,11 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             continue;
         }
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 3 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Accepter] Checkpoint 3 reached.", get_thread_id_cached());
         }
         if (HDE::is_rate_limited(std::string(ip_str)) && HDE::server_config.enable_DoS_protection) [[unlikely]] {
             if (HDE::server_config.log_level != MINIMAL) {
-                LOG_INFO(logger, "[Thread {}]: [Accepter] Deteched possible DoS attempt from client {}. The server will attempt to close the connection, and shuts it if that fails.", get_thread_id_cached(), ip_str);
+                LOG_NOTICE(logger, "[Thread {}]: [Accepter] Deteched possible DoS attempt from client {}. The server will attempt to close the connection, and shuts it if that fails.", get_thread_id_cached(), ip_str);
             }
             if (close(client_socket_fd) < 0) [[unlikely]] {
                 shutdown(client_socket_fd, SHUT_RDWR);
@@ -696,23 +797,23 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
         }
         bytesRead = read(client_socket_fd, local_buf, sizeof(local_buf) - 1);
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Accepter] Checkpoint 4 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Accepter] Checkpoint 4 reached.", get_thread_id_cached());
         }
         if (bytesRead > 0 && bytesRead < sizeof(local_buf) - 1) [[likely]] {
             local_buf[bytesRead] = '\0'; //null terminator
             if (HDE::server_config.log_level == FULL) {
-                LOG_INFO(logger, "[Thread {}]: [Accepter] About to acquire address_queue_mutex in .emplate_response()", get_thread_id_cached());
+                LOG_DEBUG(logger, "[Thread {}]: [Accepter] About to acquire address_queue_mutex in .emplate_response()", get_thread_id_cached());
             }
             address_queue.emplace_response(client_socket_fd, std::span(local_buf, bytesRead), logger);
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                LOG_INFO(logger, "[Thread {}]: [Accepter] Received data from {}:\n{}", get_thread_id_cached(), ip_str, std::string(local_buf));
+                LOG_DEBUG(logger, "[Thread {}]: [Accepter] Received data from {}:\n{}", get_thread_id_cached(), ip_str, std::string(local_buf));
             } else if (HDE::server_config.log_level == DECREASED) {
                 LOG_INFO(logger, "[Thread {}]: [Accepter] Client {} is connected.", get_thread_id_cached(), ip_str);
             }
             continue;
         } else if (bytesRead == 0) [[unlikely]] {
             if (HDE::server_config.log_level != MINIMAL) {
-                LOG_INFO(logger, "[Thread {}]: [Accepter] A client is disconnected to the server. No bytes are read. IP: {}. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached(), ip_str);
+                LOG_NOTICE(logger, "[Thread {}]: [Accepter] A client is disconnected to the server. No bytes are read. IP: {}. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached(), ip_str);
             }
             HDE::reportErrorMessage(logger);
             if (close(client_socket_fd) < 0) [[unlikely]] {
@@ -721,15 +822,24 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             continue;
         } else if (bytesRead >= sizeof(local_buf) - 1) [[unlikely]] {
             if (HDE::server_config.log_level != MINIMAL) {
-                LOG_INFO(logger, "[Thread {}]: [Accepter] A client has a packet that could trigger a buffer overflow, either by an oversized request or a DoS attempt. Client IP: {}. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached(), ip_str);
+                LOG_NOTICE(logger, "[Thread {}]: [Accepter] A client has a packet that could trigger a buffer overflow, either by an oversized request or a DoS attempt. Client IP: {}. Request size: {}. The server will attempt to close the connection, and shuts it down if that fails.", HDE::get_thread_id_cached(), ip_str, bytesRead);
             }
             if (close(client_socket_fd) < 0) [[unlikely]] {
                 shutdown(client_socket_fd, SHUT_RDWR);
             }
             continue;
         } else {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) [[unlikely]] {
+                if (HDE::server_config.log_level != MINIMAL) {
+                    LOG_NOTICE(logger, "[Thread {}]: [Accepter] Socket read timeout - possible Slowloris attack. The server will attempt to close the connection, and shuts it down if that fails.", HDE::get_thread_id_cached());
+                }
+                if (close(client_socket_fd) < 0) [[unlikely]] {
+                    shutdown(client_socket_fd, SHUT_RDWR);
+                }
+                continue;
+            }
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                LOG_INFO(logger, "[Thread {}]: [Accepter] General read error encountered. The server will attempt to close the connection, and shuts it down if that fails.", get_thread_id_cached());
+                LOG_NOTICE(logger, "[Thread {}]: [Accepter] General read error encountered. The server will attempt to close the connection, and shuts it down if that fails.", HDE::get_thread_id_cached());
             }
             HDE::reportErrorMessage(logger);
             if (close(client_socket_fd) < 0) [[unlikely]] {
@@ -737,13 +847,16 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             }
             continue;
         }
+        if (HDE::connection_history.size() > 1000000) {
+            connection_history.clear();
+        }
     }
     /*#ifdef __APPLE__
         close(kq);
     #elif __linux__
         close(epoll_fd);
     #endif*/
-    LOG_INFO(logger, "[Thread {}]: [Accepter] Accepter loop terminated.", get_thread_id_cached());
+    LOG_NOTICE(logger, "[Thread {}]: [Accepter] Accepter loop terminated.", get_thread_id_cached());
     return;
 }
 //Runs on independent thread
@@ -757,15 +870,10 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
     finish_initialization.wait(init_lock, [] { 
         return HDE::serverState.finished_initialization.load(std::memory_order_acquire);
     });
-    LOG_INFO(logger, "[Thread {}]: [Handler] Initializing...", get_thread_id_cached());
+    LOG_NOTICE(logger, "[Thread {}]: [Handler] Initializing...", get_thread_id_cached());
     init_lock.unlock();
-    #if HDE::threadsForHandler > 1
-        #define THREAD_LOCAL thread_local
-    #else
-        #define THREAD_LOCAL
-    #endif
-    THREAD_LOCAL std::string temp;
-    THREAD_LOCAL struct Request client;
+    thread_local std::string temp;
+    thread_local struct Request client;
     static const std::string_view bad_request_response = 
         "HTTP/1.1 400 Bad Request\r\n"
         "Content-Type: text/plain\r\n"
@@ -787,9 +895,17 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
         "Connection: close\r\n"
         "\r\n"
         "Method Not Allowed";
+    static const std::string_view unauthorized_response = 
+        "HTTP/1.1 401 Unauthorized\r\n"
+        "Content-Type: text/plain\r\n"
+        "WWW-Authenticate: Basic realm=\"Admin Area\"\r\n"
+        "Content-Length: 12\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "Unauthorized";
     for (;;) {
         if (HDE::serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Handler] Terminating handler loop...", get_thread_id_cached());
+            LOG_NOTICE(logger, "[Thread {}]: [Handler] Terminating handler loop...", get_thread_id_cached());
             address_queue.closeAllConnections();
             responder_queue.closeAllConnections();
             break;
@@ -799,7 +915,7 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
         }
         {
             if (HDE::server_config.log_level == FULL) {
-                LOG_INFO(logger, "[Thread {}]: [Handler] Acquired address_cv_mutex", get_thread_id_cached());
+                LOG_DEBUG(logger, "[Thread {}]: [Handler] Acquired address_cv_mutex", get_thread_id_cached());
             }
             cv_lock.lock();
             addr_in_addr_queue.wait(cv_lock, [&address_queue] {
@@ -810,18 +926,18 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
         if (HDE::serverState.stop_server.load(std::memory_order_seq_cst)) [[unlikely]] continue;
         //calling get_response() without the lock; double locking causes a deadlock
         if (HDE::server_config.log_level == FULL) {
-            LOG_INFO(logger, "[Thread {}]: [Handler] (checkpoint)", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Handler] (checkpoint)", get_thread_id_cached());
         }
         client = address_queue.get_response();
         if (client.location == 0) [[unlikely]] continue;
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Handler] Checkpoint 1 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Handler] Checkpoint 1 reached.", get_thread_id_cached());
         }
         HDE::Server::logClientInfo("Handler", client.msg, logger);
         //<-- Server processing steps -->
         if (!HTTPValidator::is_valid_size(client.msg.length())) [[unlikely]] {
             if (HDE::server_config.log_level != MINIMAL) {
-                LOG_INFO(logger, "[Handler] Suspicious request size: {} bytes", client.msg.length());
+                LOG_NOTICE(logger, "[Thread {}]: [Handler] Suspicious request size: {} bytes", get_thread_id_cached(), client.msg.length());
             }
             responder_queue.emplace_response(client.location, bad_request_response, logger);
             resp_in_res_queue.notify_one();
@@ -830,33 +946,131 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
         ParsedRequest parsed = HTTPParser::parse_request_line(client.msg);
         if (!parsed.valid) [[unlikely]] {
             if (HDE::server_config.log_level != MINIMAL) {
-                LOG_INFO(logger, "[Handler] Invalid/malicious request detected from fd {}", client.location);
+                LOG_NOTICE(logger, "[Thread {}]: [Handler] Invalid/malicious request detected from fd {}", get_thread_id_cached(), client.location);
             }
             responder_queue.emplace_response(client.location, bad_request_response, logger);
             resp_in_res_queue.notify_one();
             continue;
         }
-        if (parsed.method != "GET" && parsed.method != "HEAD") [[unlikely]] {
+        if (parsed.method != "GET" && parsed.method != "HEAD" && parsed.method != "POST") [[unlikely]] {
             if (HDE::server_config.log_level != MINIMAL) {
-                LOG_INFO(logger, "[Handler] Method not allowed: {}", parsed.method);
+                LOG_NOTICE(logger, "[Thread {}]: [Handler] Method not allowed: {}", get_thread_id_cached(), parsed.method);
             }
             responder_queue.emplace_response(client.location, method_not_allowed_response, logger);
             resp_in_res_queue.notify_one();
             continue;
         }
+        if (parsed.path.starts_with("/admin")) [[unlikely]] {
+            auto headers = HTTPParser::parse_headers(client.msg);
+            auto auth_it = headers.find("Authorization");
+            if (!admin_config.admin_enabled || (auth_it == headers.end() || !AdminAuth::check_auth(auth_it -> second))) {
+                responder_queue.emplace_response(client.location, unauthorized_response, logger);
+                resp_in_res_queue.notify_one();
+                server_metrics.record_request(false, client.msg.length(), unauthorized_response.length());
+                continue;
+            }
+            std::string response;
+            if (parsed.path == "/admin" || parsed.path == "/admin/") {
+                response = cache.get_response("/admin/control_panel.html");
+            } else if (parsed.path == "/admin/metrics") {
+                // Return metrics JSON
+                std::string metrics_json = server_metrics.get_metrics_json();
+                std::string metrics_response = std::format(
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Content-Length: {}\r\n"
+                    "Connection: close\r\n"
+                    "\r\n{}",
+                    metrics_json.length(), metrics_json
+                );
+                responder_queue.emplace_response(client.location, metrics_response, logger);
+                resp_in_res_queue.notify_one();
+                if (HDE::server_config.continuous_responses) [[likely]] continue;
+                else [[unlikely]] {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000 / HDE::server_config.handler_responses_per_second));
+                    continue;
+                }
+            } else if (parsed.path == "/admin/cache/reload" && parsed.method == "POST") {
+                // Reload cache
+                cache.clear_cache();
+                cache.load_static_files(HDE::file_routes_list, logger);
+                size_t count = cache.reload_all_files(logger);
+                std::string result_json = std::format("{{\"files_loaded\": {}}}", count);
+                std::string reload_response;
+                reload_response = std::format(
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Content-Length: {}\r\n"
+                    "Connection: close\r\n"
+                    "\r\n{}",
+                    result_json.length(), result_json
+                );
+                LOG_INFO(logger, "[Thread {}]: [Handler] <Reload Cache> Response: {}", HDE::get_thread_id_cached(), reload_response);
+                responder_queue.emplace_response(client.location, reload_response, logger);
+                resp_in_res_queue.notify_one();
+                if (HDE::server_config.continuous_responses) [[likely]] continue;
+                else [[unlikely]] {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000 / HDE::server_config.handler_responses_per_second));
+                    continue;
+                }
+            } else if (parsed.path == "/admin/cache/clear" && parsed.method == "POST") {
+                // Clear cache
+                cache.clear_cache();
+                std::string result_json = "{\"status\": \"cleared\"}";
+                std::string clear_response = std::format(
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Content-Length: {}\r\n"
+                    "Connection: close\r\n"
+                    "\r\n{}",
+                    result_json.length(), result_json
+                );
+                responder_queue.emplace_response(client.location, clear_response, logger);
+                resp_in_res_queue.notify_one();
+                if (HDE::server_config.continuous_responses) [[likely]] continue;
+                else [[unlikely]] {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000 / HDE::server_config.handler_responses_per_second));
+                    continue;
+                }
+            } else if (parsed.path == "/admin/shutdown" && parsed.method == "POST") {
+                LOG_CRITICAL(logger, "[Handler] Shutdown requested from admin panel");
+                // Send response first
+                std::string shutdown_json = "{\"status\": \"shutting_down\"}";
+                std::string shutdown_response = std::format(
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Content-Length: {}\r\n"
+                    "Connection: close\r\n"
+                    "\r\n{}",
+                    shutdown_json.length(), shutdown_json
+                );
+                responder_queue.emplace_response(client.location, shutdown_response, logger);
+                resp_in_res_queue.notify_one();
+                // Trigger shutdown after a delay
+                std::thread([&address_queue, &responder_queue]() {
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    HDE::clean_server_shutdown(address_queue, responder_queue);
+                }).detach();
+                continue;
+            } else {
+                // Admin endpoint not found
+                response = cache.get_response(parsed.path);
+            }
+        }
         if (HDE::server_config.log_level == FULL) {
             LOG_INFO(logger, "[Thread {}]: [Handler] Valid request: {} {}", get_thread_id_cached(), parsed.method, parsed.path);
         }
         std::string_view response = cache.get_response(parsed.path);
-
         // <-- End server processing steps zone -->
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Handler] Checkpoint 2 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Handler] Checkpoint 2 reached.", get_thread_id_cached());
         }
         responder_queue.emplace_response(client.location, response, logger);
         resp_in_res_queue.notify_one();
+        bool is_404 = response.starts_with("HTTP/1.1 404");
+        server_metrics.record_request(!is_404, client.msg.length(), response.length());
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Handler] Checkpoint 3 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Handler] Checkpoint 3 reached.", get_thread_id_cached());
         }
         if (HDE::server_config.continuous_responses) [[likely]] continue;
         else [[unlikely]] {
@@ -864,36 +1078,30 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
             continue;
         }
     }
-    LOG_INFO(logger, "[Thread {}]: [Handler] Handler loop terminated.", get_thread_id_cached());
+    LOG_NOTICE(logger, "[Thread {}]: [Handler] Handler loop terminated.", get_thread_id_cached());
     return;
 }
 //Runs on independent thread
-//Keep this at 2+ threads until we find an optimized alternative to write()
 void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger) {
     std::unique_lock<std::mutex> init_lock(HDE::serverState.init_mutex);
     std::unique_lock<std::mutex> cv_lock(HDE::serverState.response_cv_mutex, std::defer_lock);
     finish_initialization.wait(init_lock, [] {
         return HDE::serverState.finished_initialization.load(std::memory_order_acquire);
     });
-    LOG_INFO(logger, "[Thread {}]: [Responder] Initializing...", get_thread_id_cached());
+    LOG_NOTICE(logger, "[Thread {}]: [Responder] Initializing...", get_thread_id_cached());
     init_lock.unlock();
-    #if HDE::threadsForResponder > 1
-        #define THREAD_LOCAL thread_local
-    #else
-        #define THREAD_LOCAL
-    #endif
-    THREAD_LOCAL struct Response client;
-    THREAD_LOCAL const char* msg;
-    THREAD_LOCAL ssize_t res;
+    thread_local struct Response client;
+    thread_local const char* msg;
+    thread_local ssize_t res;
     for (;;) {
         if (HDE::serverState.stop_server.load(std::memory_order_relaxed)) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Responder] Terminating responder loop...", get_thread_id_cached());
+            LOG_NOTICE(logger, "[Thread {}]: [Responder] Terminating responder loop...", get_thread_id_cached());
             response.closeAllConnections();
             break;
         }
         {
-            if (HDE::server_config.log_level == FULL) LOG_INFO(logger, "[Thread {}]: [Responder] Acquired responder_cv_mutex", get_thread_id_cached());
-            if (HDE::server_config.log_level != MINIMAL) LOG_INFO(logger, "[Thread {}]: [Responder] Waiting for tasks...", get_thread_id_cached());
+            if (HDE::server_config.log_level == FULL) LOG_DEBUG(logger, "[Thread {}]: [Responder] Acquired responder_cv_mutex", get_thread_id_cached());
+            if (HDE::server_config.log_level != MINIMAL) LOG_NOTICE(logger, "[Thread {}]: [Responder] Waiting for tasks...", get_thread_id_cached());
             cv_lock.lock();
             resp_in_res_queue.wait(cv_lock, [&response] {
                 return HDE::serverState.stop_server.load(std::memory_order_acquire) || !response.empty();
@@ -903,7 +1111,7 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
         if (HDE::serverState.stop_server.load(std::memory_order_seq_cst)) [[unlikely]] continue;
         client = response.get_response();
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Responder] Checkpoint 1 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Responder] Checkpoint 1 reached.", get_thread_id_cached());
         }
         if (client == Response{}) [[unlikely]] continue;
         msg = client.msg.c_str();
@@ -916,62 +1124,62 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
             LOG_INFO(logger, "[Thread {}]: [Responder] Result of variable <res>: {}", get_thread_id_cached(), std::to_string(res));
         }
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Responder] Checkpooint 2 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Responder] Checkpooint 2 reached.", get_thread_id_cached());
         }
         if (res < 0) [[unlikely]] {
             //case where the server failed to send the message
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                LOG_INFO(logger, "[Thread {}]: [Responder] ERROR: A client failed to receive the data.", get_thread_id_cached());
+                LOG_ERROR(logger, "[Thread {}]: [Responder] ERROR: A client failed to receive the data.", get_thread_id_cached());
             }
             //try to clean this in the future
             int error_code = errno;
             if (error_code == EAGAIN || error_code == EWOULDBLOCK) [[unlikely]] { //In the future the server might ran out of resources easily, so if possible change [[unlikely]] to [[likely]].
                 if (HDE::server_config.log_level == FULL) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] The kernel's socket sending buffer is full, try writing again later. Continuously trying again the write() will be implemented in the future (not near).", get_thread_id_cached());
+                    LOG_NOTICE(logger, "[Thread {}]: [Responder] The kernel's socket sending buffer is full, try writing again later. Continuously trying again the write() will be implemented in the future (not near).", get_thread_id_cached());
                 }
                 continue;
             } else if (error_code == EPIPE) [[unlikely]] {
                 if (HDE::server_config.log_level == FULL) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] The socket has been closed by the client while transmission is happening.", get_thread_id_cached());
+                    LOG_ERROR(logger, "[Thread {}]: [Responder] The socket has been closed by the client while transmission is happening.", get_thread_id_cached());
                 }
                 continue;
             } else if (error_code == ECONNRESET) [[likely]] {
                 if (HDE::server_config.log_level == FULL) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] The connection is reset by the peer. It could be an abrupt shut down or sent a TCP reset packet.", get_thread_id_cached());
+                    LOG_ERROR(logger, "[Thread {}]: [Responder] The connection is reset by the peer. It could be an abrupt shut down or sent a TCP reset packet.", get_thread_id_cached());
                 }
                 continue;
             } else if (error_code == ETIMEDOUT) [[unlikely]] {
                 if (HDE::server_config.log_level == FULL) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] A network time out happened during transmission.", get_thread_id_cached());
+                    LOG_ERROR(logger, "[Thread {}]: [Responder] A network time out happened during transmission.", get_thread_id_cached());
                 }
                 continue;
             } else if (error_code == EBADF) [[unlikely]] {
                 if (HDE::server_config.log_level == FULL) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] The file is invalid; it has either been closed or never opened, or another unknown issue.", get_thread_id_cached());
+                    LOG_ERROR(logger, "[Thread {}]: [Responder] The file is invalid; it has either been closed or never opened, or another unknown issue.", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
             } else if (error_code == EINVAL) [[unlikely]] {
                 if (HDE::server_config.log_level == FULL) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] The file is valid but is not available for transission.", get_thread_id_cached());
+                    LOG_ERROR(logger, "[Thread {}]: [Responder] The file is valid but is not available for transission.", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
             } else if (error_code == EINTR) [[unlikely]] {
                 if (HDE::server_config.log_level == FULL) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] The socket has been closed by the client while transmission is happening, or an interrupted system call (normally I.S.Cs are usually harmless). Restarting the write function would be the way to go; implementing a loop to continuosly try the write() in the future (not near).", get_thread_id_cached());
+                    LOG_ERROR(logger, "[Thread {}]: [Responder] The socket has been closed by the client while transmission is happening, or an interrupted system call (normally I.S.Cs are usually harmless). Restarting the write function would be the way to go; implementing a loop to continuosly try the write() in the future (not near).", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
             } else if (error_code == ENOMEM) [[unlikely]] {
                 if (HDE::server_config.log_level == FULL) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] The server ran out of memory trying to complete the request. Either there being not enough memory (while creating internal structures), or this is a sign of a possible attack.", get_thread_id_cached());
+                    LOG_CRITICAL(logger, "[Thread {}]: [Responder] The server ran out of memory trying to complete the request. Either there being not enough memory (while creating internal structures), or this is a sign of a possible attack.", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
             } else [[likely]] {
                 if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                    LOG_INFO(logger, "[Thread {}]: [Responder] An undocumented error occured.", get_thread_id_cached());
+                    LOG_CRITICAL(logger, "[Thread {}]: [Responder] An undocumented error occured.", get_thread_id_cached());
                 }
                 HDE::reportErrorMessage(logger);
                 continue;
@@ -984,15 +1192,15 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
         } else if (res == 0) [[unlikely]] {
             //requested to write 0 bytes. typically not an error, but log this event
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                LOG_INFO(logger, "[Thread {}]: [Responder] 0 bytes sent to the client. Either they requested 0 bytes or this could be an internal server error causing no bytes to be sent.", get_thread_id_cached());
+                LOGV_NOTICE(logger, "[Thread {}]: [Responder] 0 bytes sent to the client. Either they requested 0 bytes or this could be an internal server error causing no bytes to be sent.", get_thread_id_cached());
             }
         }
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_INFO(logger, "[Thread {}]: [Responder] Checkpoint 2 reached.", get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Responder] Checkpoint 2 reached.", get_thread_id_cached());
         }
         if (close(client.destination) < 0) [[unlikely]] {
             if (HDE::server_config.log_level == FULL) {
-                LOG_INFO(logger, "[Thread {}]: [Responder] An error occured while trying to close the connection. The server will force a shut down.", get_thread_id_cached());
+                LOG_ERROR(logger, "[Thread {}]: [Responder] An error occured while trying to close the connection. The server will force a shut down.", get_thread_id_cached());
             }
             HDE::reportErrorMessage(logger);
             HDE::Server::logClientInfo("Responder", client.msg, logger);
@@ -1010,7 +1218,7 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
             continue;
         }
     }
-    LOG_INFO(logger, "[Thread {}]: [Responder] Responder loop terminated.", get_thread_id_cached());
+    LOG_NOTICE(logger, "[Thread {}]: [Responder] Responder loop terminated.", get_thread_id_cached());
     return;
 }
 
@@ -1018,49 +1226,51 @@ void HDE::Server::launch(quill::Logger* logger) {
     //The totalUsedThreads and individual thread allocation for each tasks checks are mostly for future performance improvements such as cpu core pinning.
     //Checking server configurations during start up
     if (HDE::server_config.totalUsedThreads > HDE::NUM_THREADS) [[unlikely]] {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The amount of allocated threads is: {} threads. The amount of available threads: {} threads. Exiting...", get_thread_id_cached(), HDE::server_config.totalUsedThreads, HDE::NUM_THREADS);
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The amount of allocated threads is: {} threads. The amount of available threads: {} threads. Exiting...", get_thread_id_cached(), HDE::server_config.totalUsedThreads, HDE::NUM_THREADS);
         exit(EXIT_FAILURE);
     } else if (HDE::server_config.threadsForAccepter > HDE::NUM_THREADS - 2 || HDE::server_config.threadsForHandler > HDE::NUM_THREADS - 2 || HDE::server_config.threadsForResponder > HDE::NUM_THREADS - 2) [[unlikely]] {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The maximum thread count for any task Accepter, Handler, or Responder is {} threads, thy shall not go over that. Exiting...", get_thread_id_cached(), std::to_string(HDE::NUM_THREADS - 2));
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The maximum thread count for any task Accepter, Handler, or Responder is {} threads, thy shall not go over that. Exiting...", get_thread_id_cached(), std::to_string(HDE::NUM_THREADS - 2));
         exit(EXIT_FAILURE);
     } else if (HDE::server_config.threadsForAccepter < 1 || HDE::server_config.threadsForHandler < 1 || HDE::server_config.threadsForResponder < 1) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The minimum value for each tasks must be 1 threads.", HDE::get_thread_id_cached());
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The minimum value for each tasks must be 1 threads.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     } else if (HDE::server_config.totalUsedThreads < 3) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The minimum value for total used threads is 3. The amount allocated: {}", HDE::get_thread_id_cached(), std::to_string(HDE::server_config.totalUsedThreads));
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid thread allocation. The minimum value for total used threads is 3. The amount allocated: {}", HDE::get_thread_id_cached(), std::to_string(HDE::server_config.totalUsedThreads));
         exit(EXIT_FAILURE);
     } else if (HDE::server_config.queueCount < 1) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid queueCount configuration.", HDE::get_thread_id_cached());
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid queueCount configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     } else if (HDE::server_config.MAX_CONNECTIONS_PER_SECOND < 1) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid MAX_CONNECTIONS_PER_SECOND configuration.", HDE::get_thread_id_cached());
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid MAX_CONNECTIONS_PER_SECOND configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::server_config.MAX_ADDRESS_QUEUE_SIZE < 1) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid server_config.MAX_ADDRESS_QUEUE_SIZE configuration.", HDE::get_thread_id_cached());
+    } else if (HDE::server_config.MAX_ADDRESS_QUEUE_SIZE < -1) {
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid server_config.MAX_ADDRESS_QUEUE_SIZE configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < 1) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid max_responses_queue_size configuration.", HDE::get_thread_id_cached());
+    } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < -1) {
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid max_responses_queue_size configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     } else if (HDE::server_config.MAX_BUFFER_SIZE < 1) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid server_config.MAX_BUFFER_SIZE configuration. Normally I'd recommend setting the client request size in bytes to around 30000.", HDE::get_thread_id_cached());
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid server_config.MAX_BUFFER_SIZE configuration. Normally I'd recommend setting the client request size in bytes to around 30000.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     } else if (static_cast<int>(HDE::server_config.log_level) < 0) {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] Invalid server_config.log_level configuration.", HDE::get_thread_id_cached());
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid server_config.log_level configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     }
     if (HDE::NUM_THREADS < 1)[[unlikely]] {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] This is not your fault; the server doesn't return a valid thread amount.", HDE::get_thread_id_cached());
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] This is not your fault; the server doesn't return a valid thread amount.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     } 
     //Warnings/Advisories
-    if (HDE::server_config.MAX_BUFFER_SIZE < 30000 && HDE::server_config.MAX_BUFFER_SIZE > 500) [[unlikely]] {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] WARNING: BUFFER_SIZE might be insufficient to receive client requests.", HDE::get_thread_id_cached());
-    } else if (HDE::server_config.MAX_ADDRESS_QUEUE_SIZE < 10000) [[unlikely]] {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have server_config.MAX_ADDRESS_QUEUE_SIZE more than 10000, in case the amount of requests backs up during peaj/extreme loads.", HDE::get_thread_id_cached());
-    } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < 10000) [[unlikely]] {
-        LOG_INFO(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have max_responses_queue_size more than 10000, in case the amount of responses backs up during peak/extreme loads.", HDE::get_thread_id_cached());
+    if (!HDE::server_config.disable_warnings){
+        if (HDE::server_config.MAX_BUFFER_SIZE < 30000 && HDE::server_config.MAX_BUFFER_SIZE > 500) [[unlikely]] {
+            LOG_NOTICE(logger, "[Thread {}]: [Main Thread] WARNING: BUFFER_SIZE might be insufficient to receive client requests.", HDE::get_thread_id_cached());
+        } else if (HDE::server_config.MAX_ADDRESS_QUEUE_SIZE < 10000) [[unlikely]] {
+            LOG_NOTICE(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have server_config.MAX_ADDRESS_QUEUE_SIZE more than 10000, in case the amount of requests backs up during peaj/extreme loads.", HDE::get_thread_id_cached());
+        } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < 10000) [[unlikely]] {
+            LOG_NOTICE(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have max_responses_queue_size more than 10000, in case the amount of responses backs up during peak/extreme loads.", HDE::get_thread_id_cached());
+        }
     }
-    cache.load_files(file_routes_list, logger);
+    cache.load_static_files(file_routes_list, logger);
     //Configuring socket options
     int opt = 1;
     setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
@@ -1096,9 +1306,9 @@ void HDE::Server::launch(quill::Logger* logger) {
 }
 
 #ifdef __APPLE__
-    int pin_thread_to_core(int cpu_id) {
+    //int pin_thread_to_core(int cpu_id) {
         //just keep this empty it's kinda useless but dont delete it
-    }
+    //}
 #elif __linux__
     void pin_thread_to_core(std::thread& t, int core_id) {
         cpu_set_t cpuset;

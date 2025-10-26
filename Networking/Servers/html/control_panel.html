@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Control Panel</title>
+    <link rel="stylesheet" href="../css/control_panel.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-left">
+                <h1>Server Control Panel</h1>
+                <div class="status-badge" id="server-status">
+                    <span class="status-dot"></span>
+                    <span>Online</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <a href="http://192.168.12.109/" class="btn-home">
+                    <span>Back to Home</span>
+                </a>
+            </div>
+        </div>
+        
+        <!-- Metrics Grid -->
+        <div class="grid">
+            <div class="card">
+                <h3>Uptime</h3>
+                <div class="value" id="uptime">0s</div>
+                <div class="label">Server running time</div>
+            </div>
+            
+            <div class="card">
+                <h3>Total Requests</h3>
+                <div class="value" id="total-requests">0</div>
+                <div class="label">All time requests</div>
+            </div>
+            
+            <div class="card">
+                <h3>Requests/Second</h3>
+                <div class="value" id="req-per-sec">0.00</div>
+                <div class="label">Average rate</div>
+            </div>
+            
+            <div class="card">
+                <h3>Success Rate</h3>
+                <div class="value" id="success-rate">100%</div>
+                <div class="label">Successful requests</div>
+            </div>
+            
+            <div class="card">
+                <h3>Data Sent</h3>
+                <div class="value" id="bytes-sent">0 KB</div>
+                <div class="label">Total transmitted</div>
+            </div>
+            
+            <div class="card">
+                <h3>Data Received</h3>
+                <div class="value" id="bytes-received">0 KB</div>
+                <div class="label">Total received</div>
+            </div>
+        </div>
+        
+        <!-- Actions Card -->
+        <div class="actions-card">
+            <h3>Server Actions</h3>
+            <div class="actions">
+                <button class="btn btn-primary" onclick="reloadCache()">
+                    <span>Reload Cache</span>
+                </button>
+                <button class="btn btn-warning" onclick="clearCache()">
+                    <span>Clear Cache</span>
+                </button>
+                <button class="btn btn-success" onclick="exportMetrics()">
+                    <span>Export Metrics</span>
+                </button>
+                <button class="btn btn-danger" onclick="shutdownServer()">
+                    <span>Shutdown Server</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Log Panel -->
+        <div class="log-panel">
+            <h3>Activity Log</h3>
+            <div class="log-container" id="log-container">
+                <div class="log-entry success">
+                    <span class="timestamp">[SYSTEM]</span> Control panel initialized successfully
+                </div>
+            </div>
+        </div>
+        <p>Do not check the website's logs during reloading cache, check the server system logs.</p>
+    </div>
+    
+    <script src="../js/control_panel.js"></script>
+</body>
+</html>

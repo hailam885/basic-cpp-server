@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to My Server</title>
+    <link rel="stylesheet" href="../css/index.css">
+</head>
+<body>
+    <!-- Background Animation -->
+    <div class="bg-animation"></div>
+    
+    <!-- Floating Particles -->
+    <div class="particles" id="particles"></div>
+    
+    <!-- Navigation -->
+    <nav>
+        <div class="container">
+            <div class="logo">🚀 My Server</div>
+            <ul>
+                <li><a href="#home">Home</a></li>
+                <li><a href="#features">Features</a></li>
+                <li><a href="#projects">Projects</a></li>
+                <li><a href="http://192.168.12.109/admin">Admin Panel</a></li>
+            </ul>
+        </div>
+    </nav>
+    
+    <!-- Hero Section -->
+    <section class="hero" id="home">
+        <div class="hero-content">
+            <h1>Welcome to the Future</h1>
+            <p>Experience lightning-fast performance with our custom-built C++ server. Designed for speed, reliability, and scalability.</p>
+            <div class="cta-buttons">
+                <a href="#features" class="btn btn-primary">Explore Features</a>
+                <a href="http://192.168.12.109/admin" class="btn btn-secondary">Admin Dashboard</a>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Features Section -->
+    <section class="features scroll-fade" id="features">
+        <h2 class="section-title">Powerful Features</h2>
+        <p class="section-subtitle">Built with modern C++23, optimized for maximum performance and reliability</p>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <h3>Lightning Fast</h3>
+                <p>Multi-threaded architecture with optimized request handling delivers exceptional speed and throughput.</p>
+            </div>
+            
+            <div class="feature-card">
+                <h3>Secure by Design</h3>
+                <p>Built-in security features including DoS protection, rate limiting, and input sanitization.</p>
+            </div>
+            
+            <div class="feature-card">
+                <h3>Real-time Metrics</h3>
+                <p>Monitor server performance with live metrics, detailed logging, and analytics dashboard.</p>
+            </div>
+            
+            <div class="feature-card">
+                <h3>High Performance</h3>
+                <p>Handles thousands of concurrent connections with minimal latency and maximum efficiency.</p>
+            </div>
+            
+            <div class="feature-card">
+                <h3>Hot Reload</h3>
+                <p>Update cached content without server restart. Keep your server running 24/7.</p>
+            </div>
+            
+            <div class="feature-card">
+                <h3>Admin Control</h3>
+                <p>Comprehensive admin panel for server management, monitoring, and configuration.</p>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Stats Section -->
+    <section class="stats scroll-fade" id="stats">
+        <h2 class="section-title">Performance Metrics</h2>
+        <p class="section-subtitle">Real-time statistics from our production server</p>
+        
+        <div class="stats-grid">
+            <div class="stat-item">
+                <div class="stat-number" id="stat-uptime">99.9%</div>
+                <div class="stat-label">Uptime</div>
+            </div>
+            
+            <div class="stat-item">
+                <div class="stat-number" id="stat-requests">100K+</div>
+                <div class="stat-label">Requests/Day</div>
+            </div>
+            
+            <div class="stat-item">
+                <div class="stat-number" id="stat-latency">&lt;10ms</div>
+                <div class="stat-label">Avg Latency</div>
+            </div>
+            
+            <div class="stat-item">
+                <div class="stat-number" id="stat-threads">8</div>
+                <div class="stat-label">Worker Threads</div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Projects Section -->
+    <section class="projects scroll-fade" id="projects">
+        <h2 class="section-title">My Projects</h2>
+        <p class="section-subtitle">Explore other websites and applications I've built</p>
+        
+        <div class="projects-grid">
+            <!-- Project Card 1 -->
+            <div class="project-card" onclick="window.location.href='http://192.168.12.109/random'">
+                <div class="project-content">
+                    <div class="project-header">
+                        <h3>Random Site</h3>
+                        <span class="project-status status-live">Live</span>
+                    </div>
+                    <p class="project-description">
+                        A random page
+                    </p>
+                    <div class="project-tags">
+                        <!--<span class="tag"></span>
+                        <span class="tag"></span>
+                        <span class="tag"></span>-->
+                    </div>
+                    <a href="http://192.168.12.109/random" class="project-link" onclick="event.stopPropagation()">
+                        Visit Site →
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Project Card 2 -->
+            <div class="project-card" onclick="window.location.href='http://192.168.12.109/randoma'">
+                <div class="project-content">
+                    <div class="project-header">
+                        <h3>SwiftHost</h3>
+                        <span class="project-status status-live">Live</span>
+                    </div>
+                    <p class="project-description">
+                        Another random site that doesn't mean anything
+                    </p>
+                    <div class="project-tags">
+                        <!--<span class="tag">React Native</span>
+                        <span class="tag">Firebase</span>
+                        <span class="tag">Redux</span>-->
+                    </div>
+                    <a href="http://192.168.12.109/randoma" class="project-link" onclick="event.stopPropagation()">
+                        Visit Site →
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Project Card 3 -->
+            <div class="project-card" onclick="window.location.href='http://192.168.12.109/resources'">
+                <div class="project-content">
+                    <div class="project-header">
+                        <h3>Others</h3>
+                        <span class="project-status status-live">Live</span> <!-- status-live/dev/coming -> different colors -->
+                    </div>
+                    <p class="project-description">
+                        Some other related websites
+                    </p>
+                    <div class="project-tags">
+                        <!--<span class="tag">WebGL</span>
+                        <span class="tag">Node.js</span>
+                        <span class="tag">Socket.io</span>-->
+                    </div>
+                    <a href="http://192.168.12.109/resources" class="project-link" onclick="event.stopPropagation()">
+                        Visit Site →
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Project Card 4 Here -->
+            
+        </div>
+    </section>
+    
+    <!-- CTA Section -->
+    <section class="cta-section scroll-fade">
+        <div class="cta-box">
+            <h2>Ready to Experience Peak Performance?</h2>
+            <p>Access the admin dashboard to monitor and control your server in real-time.</p>
+            <div class="cta-buttons">
+                <a href="http://192.168.12.109/admin" class="btn btn-primary">Go to Admin Panel</a>
+                <a href="#projects" class="btn btn-secondary">View All Projects</a>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Footer -->
+    <footer>
+        <p>Built with C++23 | <a href="https://github.com">View on GitHub</a></p>
+        <p style="margin-top: 10px; font-size: 14px;">Powered by custom high-performance server architecture</p>
+        <p style="margin-top: 10px; font-size: 14px;">Made with Claude AI</p>
+    </footer>
+    
+    <script src="../js/index.js"></script>
+</body>
+</html>

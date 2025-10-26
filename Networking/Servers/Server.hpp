@@ -7,15 +7,12 @@
 
 //Benchmarking: set logs to minimal, turn off all other apps, disable enable_DoS_protection if needed, and benchmark with 100K, 1M, or 10M requests.
 
+//alignas() const/mutable constexpr inline static thread_local volatile friend (enum/class/) <datatype>
+
 //Switching to linux might require refactoring of the entire code base.
 
 
-
-
 //Requires MAJOR refactoring
-
-
-
 
 
 struct Request;
@@ -71,11 +68,11 @@ struct alignas(CACHE_LINE_SIZE * 8) serverStatus {
 };
 
 struct ParsedRequest {
-        std::string method;
-        std::string path;
-        std::string_view version;
-        bool valid = false;
-    };
+    std::string method;
+    std::string path;
+    std::string_view version;
+    bool valid = false;
+};
 
 namespace HDE {
     //Only create an object is this enum ONCE
@@ -91,33 +88,41 @@ namespace HDE {
         public:
             static ParsedRequest parse_request_line(std::string_view request) noexcept;
             //for parsing full headers, might need later
-            static std::unordered_map<std::string_view, std::string_view> parse_headers(std::string_view request) noexcept;
+            inline static std::unordered_map<std::string_view, std::string_view> parse_headers(std::string_view request) noexcept;
     };
 
     class ResponseCache {
         private:
-            std::unordered_map<std::string_view, std::string_view> cache;
+            std::unordered_map<std::string, std::string> cache;
             mutable std::shared_mutex cache_mutex;
             std::string not_found_response;
+            std::string public_root;
+            std::vector<std::pair<std::string, std::string>> loaded_routes;
+            inline static std::string_view get_content_type(std::string_view path) noexcept;
+            constexpr inline void create_404_response(); //loads into not_found_html & not_found_response
         public:
-            void load_files(const std::vector<std::pair<std::string, std::string>>& routes, quill::Logger* logger);
-            std::string_view get_response(std::string_view path) const noexcept;
-            bool reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger);
+            inline void load_static_files(const std::vector<std::pair<std::string, std::string>>& routes, quill::Logger* logger);
+            inline std::string_view get_response(std::string_view path) const noexcept;
+            inline std::optional<std::string> load_file_response(const std::string& file_path) const;
+            inline bool reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger);
+            inline size_t reload_all_files(quill::Logger* logger);
+            inline void clear_cache();
+            inline size_t get_cache_size() const;
     };
 
     class PathValidator {
         public:
-            static std::string sanitize_path(std::string_view raw_path) noexcept;
-            static std::string url_decode(const std::string& str) noexcept;
-            static int hex_to_int(char c) noexcept;
+            inline static std::string sanitize_path(std::string_view raw_path) noexcept;
+            inline static std::string url_decode(const std::string& str) noexcept;
+            inline static int hex_to_int(char c) noexcept;
     };
 
     class HTTPValidator {
         public:
-            static bool is_valid_method(std::string_view method) noexcept;
-            static bool is_valid_version(std::string_view method) noexcept;
-            static bool is_valid_request_line(std::string_view request) noexcept;
-            static bool is_valid_size(size_t size) noexcept;
+            inline static bool is_valid_method(std::string_view method) noexcept;
+            inline static bool is_valid_version(std::string_view method) noexcept;
+            inline static bool is_valid_request_line(std::string_view request) noexcept;
+            inline static bool is_valid_size(size_t size) noexcept;
     };
 
     //in the future try to combine all configurations into a struct and pass into cpu for effective cache line usage.
@@ -133,14 +138,16 @@ namespace HDE {
         int MAX_ADDRESS_QUEUE_SIZE = -1; //             -1 disables the limit
         int MAX_RESPONSES_QUEUE_SIZE = -1; //           -1 disables the limit
         const size_t MAX_BUFFER_SIZE = 30721; //        size in bytes, recommended to be 30K+ bytes, avoid too high (50K+)
-        enum logLevel log_level = MINIMAL; //           FULL / DEFAULT / DECREASED / MINIMAL
-        bool disable_logging = true; //                Fully disables logging besides the start up and config checking logs
+        enum logLevel log_level = DECREASED; //           FULL / DEFAULT / DECREASED / MINIMAL
+        bool disable_logging = false; //                Fully disables logging besides the start up and config checking logs
+        bool disable_warnings = true; //                Disables some warnings
         //backlog count are in a/Networking/Sockets/ListeningSocket.hpp, change the variable "backlog"
 
         //              [ Performance ]
 
         //dev notes
         //Try to improve handler function efficiency. also the write() function in responder is extremely inefficient, look for faster and less overhead alternatives to the write() function.
+        //if the acceper/handler/responder's thread count is 1, delete the thread_local in the variables before the infinite loops.
 
         int threadsForAccepter = 1; //                  minimum 1
         int threadsForHandler = 6; //                   minimum 1, process is computation heavy so allocate more threads
@@ -155,21 +162,70 @@ namespace HDE {
         //              [ Security ]
 
         bool enable_DoS_protection = false; //          true / 
-        bool valid_request_size_tolerance = 10240; //   a configurable tolerance for max HTTP request size in bytes
     };
 
-    //Put all files in the server here so it is loaded during initialization
+    alignas(CACHE_LINE_SIZE) inline serverConfig server_config;
+
+    //Put every single html/css/js
+    //always include a slash before the file type i.e. /pdf, /img, /jpeg
+    inline std::string server_dir = "/Users/trangtran/Desktop/coding_files/a/Networking/Servers";
+    //file routes doesn't update, requires a restart to update
     inline std::vector<std::pair<std::string, std::string>> file_routes_list = {
-        {"/", "/html_templates/index.html"},
-        {"/random", "/html_templates/path/random.html"}
-        // Add all your routes here
+        //HTML
+        {"/", server_dir + "/html/index.html"},
+        {"/admin", server_dir + "/html/control_panel.html"},
+        {"/random", server_dir + "/html/path/random.html"},
+        {"/randoma", server_dir + "/html/path/randoma.html"},
+        {"/resources", server_dir + "/html/path/resources.html"},
+        //CSS
+        {"/css/index.css", server_dir + "/css/index.css"},
+        {"/css/control_panel.css", server_dir + "/css/control_panel.css"},
+        {"/css/path/random.css", server_dir + "/css/path/random.css"},
+        {"/css/path/randoma.css", server_dir + "/css/path/randoma.css"},
+        {"/css/path/resources.css", server_dir + "/css/path/resources.css"},
+        //JS
+        {"/js/index.js", server_dir + "/js/index.js"},
+        {"/js/control_panel.js", server_dir + "/js/control_panel.js"},
+        {"/js/path/random.js", server_dir + "/js/path/random.js"},
+        {"/js/path/randoma.js", server_dir + "/js/path/randoma.js"},
+        {"/js/path/resources.js", server_dir + "/js/path/resources.js"}
+        //OTHERS
     };
 
     //DO NOT DELETE OR UNCOMMENT ANY OF THE COMMENTS THEY'RE THERE FOR A REASON
 
+    //Performance monitoring
+
+    struct alignas(CACHE_LINE_SIZE) ServerMetrics{
+        std::atomic<uint64_t> total_requests{0};
+        std::atomic<uint64_t> successful_requests{0};
+        std::atomic<uint64_t> failed_requests{0};
+        std::atomic<uint64_t> bytes_sent{0};
+        std::atomic<uint64_t> bytes_received{0};
+        std::chrono::steady_clock::time_point start_time;
+        ServerMetrics() : start_time(std::chrono::steady_clock::now()) {};
+        void record_request(bool success, size_t bytes_in, size_t bytes_out);
+        std::string get_metrics_json() const;
+    };
+
+    struct AdminConfig {
+        std::string_view admin_password = "lamtran1234";
+        bool admin_enabled = true;
+        const std::string admin_path_prefix = "/admin";
+    };
+
+    inline AdminConfig admin_config;
+
+    class AdminAuth {
+        public:
+            static bool check_auth(std::string_view auth_header);
+        private:
+            static std::string base64_decode(std::string_view encoded);
+    };
+
     //creating structs
     alignas(CACHE_LINE_SIZE * 8) inline serverStatus serverState;
-    alignas(CACHE_LINE_SIZE) inline serverConfig server_config;
+    alignas(CACHE_LINE_SIZE) inline ServerMetrics server_metrics;
 
     //Server configurations
     //alignas(CACHE_LINE_SIZE) constexpr int queueCount = 10000000;
