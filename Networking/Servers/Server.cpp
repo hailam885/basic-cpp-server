@@ -374,38 +374,28 @@ inline std::unordered_map<std::string_view, std::string_view> HDE::HTTPParser::p
 }
 
 inline std::optional<std::string> HDE::ResponseCache::load_file_response(const std::string& file_path) const {
-    /*
-    //use this to determine file type:
-    size_t dot_pos = path.rfind('.');
-    if (dot_pos == std::string_view::npos) return "application/octet-stream";
-    std::string_view ext = path.substr(dot_pos);
-    //chain of ifs to determine filetype:
-    if (ext == css) ... if (ext == html || ext == htm) ...
-    (at the end) -> no specific file type, application filetype
-
-    //use for images/font/etc (binary files)
     std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) [[unlikely]] return std::nullopt;
     auto size = file.tellg();
+    if (size <= 0) [[unlikely]] file.close(); return std::nullopt;
     file.seekg(0);
-
     std::string content;
     content.resize(size);
-    file.read(content.data(), size); //potentially set this to a variable then return
+    file.read(content.data(), size);
     file.close();
-    */
-    std::ifstream file(file_path, std::ios::binary);
-    if (!file.is_open()) return std::nullopt;
-    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    file.close();
-    std::string_view content_type = get_content_type(file_path);
+    std::string_view content_type = HDE::ResponseCache::get_content_type(file_path);
     return std::format(
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: {}\r\n"
         "Content-Length: {}\r\n"
         "Connection: close\r\n"
-        "Cache-Control: public, max-age=3600\r\n"
+        "X-Content-Type-Options: nosniff\r\n"           // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                     // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"           // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
         "\r\n{}",
-        content_type, content.length(), content
+        content_type, size, content
     );
 }
 
@@ -453,13 +443,19 @@ inline std::string_view HDE::ResponseCache::get_response(std::string_view path) 
 }
 
 inline bool HDE::ResponseCache::reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger) {
-    std::ifstream file(file_path, std::ios::binary);
-    if (!file.is_open()) [[unlikely]] return false;
-    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) [[unlikely]] return std::nullopt;
+    auto size = file.tellg();
+    if (size <= 0) [[unlikely]] file.close(); return std::nullopt;
+    file.seekg(0);
+    std::string content;
+    content.resize(size);
+    file.read(content.data(), size);
     file.close();
+    std::string_view content_type = HDE::ResponseCache::get_content_type(file_path);
     std::string response = std::format(
         "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
+        "Content-Type: {}\r\n"
         "Content-Length: {}\r\n"
         "Connection: close\r\n"
         "X-Content-Type-Options: nosniff\r\n"           // Prevent MIME sniffing
@@ -468,7 +464,7 @@ inline bool HDE::ResponseCache::reload_file(const std::string& path, const std::
         "Content-Security-Policy: default-src 'self'\r\n"  // CSP
         "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
         "\r\n{}",
-        content.length(), content
+        content_type, size, content
     );
     std::unique_lock<std::shared_mutex> lock(cache_mutex);
     cache[path] = std::move(response);
@@ -512,6 +508,11 @@ constexpr inline void HDE::ResponseCache::create_404_response() {
         "Content-Type: text/html; charset=utf-8\r\n"
         "Content-Length: {}\r\n"
         "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"           // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                     // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"           // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
         "\r\n{}",
         not_found_html.length(), not_found_html
     );
@@ -874,33 +875,53 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
     init_lock.unlock();
     thread_local std::string temp;
     thread_local struct Request client;
-    static const std::string_view bad_request_response = 
+    thread_local static const std::string_view bad_request_response = 
         "HTTP/1.1 400 Bad Request\r\n"
         "Content-Type: text/plain\r\n"
         "Content-Length: 11\r\n"
         "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
         "\r\n"
         "Bad Request";
-    static const std::string_view forbidden_response = 
+    thread_local static const std::string_view forbidden_response = 
         "HTTP/1.1 403 Forbidden\r\n"
         "Content-Type: text/plain\r\n"
         "Content-Length: 9\r\n"
         "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
         "\r\n"
         "Forbidden";
-    static const std::string_view method_not_allowed_response = 
+    thread_local static const std::string_view method_not_allowed_response = 
         "HTTP/1.1 405 Method Not Allowed\r\n"
         "Content-Type: text/plain\r\n"
         "Content-Length: 18\r\n"
         "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
         "\r\n"
         "Method Not Allowed";
-    static const std::string_view unauthorized_response = 
+    thread_local static const std::string_view unauthorized_response = 
         "HTTP/1.1 401 Unauthorized\r\n"
         "Content-Type: text/plain\r\n"
         "WWW-Authenticate: Basic realm=\"Admin Area\"\r\n"
         "Content-Length: 12\r\n"
         "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
         "\r\n"
         "Unauthorized";
     for (;;) {
@@ -980,6 +1001,11 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
                     "Content-Type: application/json\r\n"
                     "Content-Length: {}\r\n"
                     "Connection: close\r\n"
+                    "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+                    "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+                    "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+                    "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+                    "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
                     "\r\n{}",
                     metrics_json.length(), metrics_json
                 );
@@ -1002,6 +1028,11 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
                     "Content-Type: application/json\r\n"
                     "Content-Length: {}\r\n"
                     "Connection: close\r\n"
+                    "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+                    "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+                    "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+                    "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+                    "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
                     "\r\n{}",
                     result_json.length(), result_json
                 );
@@ -1022,6 +1053,11 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
                     "Content-Type: application/json\r\n"
                     "Content-Length: {}\r\n"
                     "Connection: close\r\n"
+                    "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+                    "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+                    "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+                    "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+                    "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
                     "\r\n{}",
                     result_json.length(), result_json
                 );
@@ -1041,6 +1077,11 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
                     "Content-Type: application/json\r\n"
                     "Content-Length: {}\r\n"
                     "Connection: close\r\n"
+                    "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+                    "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+                    "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+                    "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+                    "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
                     "\r\n{}",
                     shutdown_json.length(), shutdown_json
                 );

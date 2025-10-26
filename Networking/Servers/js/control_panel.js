@@ -18,12 +18,14 @@ function formatBytes(bytes) {
     return (bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2) + ' TB';
 }
 function formatUptime(seconds) {
-    const days = Math.floor(seconds / 86400);
+    const year = Math.floor(seconds / 31536000);
+    const days = Math.floor((seconds % 31536000) / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${mins}m`;
+    if (year > 0) return `${year}y ${days}d ${hours}h ${mins}m ${secs}s`;
+    if (days > 0) return `${days}d ${hours}h ${mins}m ${secs}s`;
+    if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
     if (mins > 0) return `${mins}m ${secs}s`;
     return `${secs}s`;
 }
@@ -125,4 +127,4 @@ async function shutdownServer() {
 }
 let refreshInterval;
 updateMetrics();
-refreshInterval = setInterval(updateMetrics, 1000);
+refreshInterval = setInterval(updateMetrics, 500);

@@ -43,6 +43,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <unordered_map>

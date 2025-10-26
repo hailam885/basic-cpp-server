@@ -138,8 +138,8 @@ namespace HDE {
         int MAX_ADDRESS_QUEUE_SIZE = -1; //             -1 disables the limit
         int MAX_RESPONSES_QUEUE_SIZE = -1; //           -1 disables the limit
         const size_t MAX_BUFFER_SIZE = 30721; //        size in bytes, recommended to be 30K+ bytes, avoid too high (50K+)
-        enum logLevel log_level = DECREASED; //           FULL / DEFAULT / DECREASED / MINIMAL
-        bool disable_logging = false; //                Fully disables logging besides the start up and config checking logs
+        enum logLevel log_level = MINIMAL; //           FULL / DEFAULT / DECREASED / MINIMAL
+        bool disable_logging = true; //                Fully disables logging besides the start up and config checking logs
         bool disable_warnings = true; //                Disables some warnings
         //backlog count are in a/Networking/Sockets/ListeningSocket.hpp, change the variable "backlog"
 
