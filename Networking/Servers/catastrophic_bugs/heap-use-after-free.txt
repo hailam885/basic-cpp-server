@@ -1,0 +1,160 @@
+15:01:30.251537250 [714299] Server.cpp:1528              LOG_NOTICE    root         [Thread 0x16d51b000]: [Responder] Waiting for tasks...
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         [Thread 0x16d1d3000]: [Accepter] Received data from 192.168.12.109:
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         GET /favicon.ico HTTP/1.1\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         Host: 192.168.12.109\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         Connection: keep-alive\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         DNT: 1\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         Referer: http://192.168.12.109/\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept-Encoding: gzip, deflate\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept-Language: en-US,en;q=0.9\x0D
+15:01:30.313019000 [714293] Server.cpp:1183              LOG_DEBUG     root         \x0D
+15:01:30.313033000 [714293] Server.cpp:1123              LOG_INFO      root         [Thread 0x16d1d3000]: [Accepter] Waiting for requests...
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         [Thread 0x16d403000]: [Handler] logClientInfo(): GET /favicon.ico HTTP/1.1\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         Host: 192.168.12.109\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         Connection: keep-alive\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         DNT: 1\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         Referer: http://192.168.12.109/\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         Accept-Encoding: gzip, deflate\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         Accept-Language: en-US,en;q=0.9\x0D
+15:01:30.313034166 [714297] Server.cpp:97                LOG_INFO      root         \x0D
+15:01:30.313082291 [714297] Server.cpp:1289              LOG_INFO      root         [Thread 0x16d403000]: [Handler] Waiting for tasks...
+15:01:30.313108625 [714299] Server.cpp:1545              LOG_INFO      root         [Thread 0x16d51b000]: [Responder] Received data from [Handler]. Processing...
+15:01:30.313119500 [714299] Server.cpp:1553              LOG_INFO      root         [Thread 0x16d51b000]: [Responder] Result of variable <res>: 255
+15:01:30.313119750 [714299] Server.cpp:1581              LOG_INFO      root         [Thread 0x16d51b000]: [Responder] Successful data transmissiont to the client.
+15:01:30.313120041 [714299] Server.cpp:1600              LOG_INFO      root         [Thread 0x16d51b000]: [Responder] Successfully sent 255 bytes
+15:01:30.313133250 [714299] Server.cpp:1618              LOG_INFO      root         ========================= Log Separator =========================
+15:01:30.313133541 [714299] Server.cpp:1528              LOG_NOTICE    root         [Thread 0x16d51b000]: [Responder] Waiting for tasks...
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         [Thread 0x16d1d3000]: [Accepter] Received data from 192.168.12.109:
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         GET /admin/metrics HTTP/1.1\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         Host: 192.168.12.109\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         Connection: keep-alive\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         Authorization: Basic YWRtaW46\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         DNT: 1\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept: */*\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         Referer: http://192.168.12.109/\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept-Encoding: gzip, deflate\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept-Language: en-US,en;q=0.9\x0D
+15:01:32.097009500 [714293] Server.cpp:1183              LOG_DEBUG     root         \x0D
+15:01:32.097014291 [714293] Server.cpp:1123              LOG_INFO      root         [Thread 0x16d1d3000]: [Accepter] Waiting for requests...
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         [Thread 0x16d48f000]: [Handler] logClientInfo(): GET /admin/metrics HTTP/1.1\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         Host: 192.168.12.109\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         Connection: keep-alive\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         Authorization: Basic YWRtaW46\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         DNT: 1\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         Accept: */*\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         Referer: http://192.168.12.109/\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         Accept-Encoding: gzip, deflate\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         Accept-Language: en-US,en;q=0.9\x0D
+15:01:32.097039000 [714298] Server.cpp:97                LOG_INFO      root         \x0D
+15:01:32.097127375 [714298] Server.cpp:1289              LOG_INFO      root         [Thread 0x16d48f000]: [Handler] Waiting for tasks...
+15:01:32.097135041 [714299] Server.cpp:1545              LOG_INFO      root         [Thread 0x16d51b000]: [Responder] Received data from [Handler]. Processing...
+15:01:32.097156458 [714299] Server.cpp:1553              LOG_INFO      root         [Thread 0x16d51b000]: [Responder] Result of variable <res>: 150
+15:01:32.097156875 [714299] Server.cpp:1581              LOG_INFO      root         [Thread 0x16d51b000]: [Responder] Successful data transmissiont to the client.
+15:01:32.097157500 [714299] Server.cpp:1600              LOG_INFO      root         [Thread 0x16d51b000]: [Responder] Successfully sent 150 bytes
+15:01:32.097173666 [714299] Server.cpp:1618              LOG_INFO      root         ========================= Log Separator =========================
+15:01:32.097174416 [714299] Server.cpp:1528              LOG_NOTICE    root         [Thread 0x16d51b000]: [Responder] Waiting for tasks...
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         [Thread 0x16d1d3000]: [Accepter] Received data from 192.168.12.109:
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         GET /admin/metrics HTTP/1.1\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         Host: 192.168.12.109\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         Connection: keep-alive\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         Authorization: Basic YWRtaW46bGFtdHJhbjEyMzQ=\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         DNT: 1\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept: */*\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         Referer: http://192.168.12.109/\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept-Encoding: gzip, deflate\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         Accept-Language: en-US,en;q=0.9\x0D
+15:01:35.746615250 [714293] Server.cpp:1183              LOG_DEBUG     root         \x0D
+15:01:35.746618291 [714293] Server.cpp:1123              LOG_INFO      root         [Thread 0x16d1d3000]: [Accepter] Waiting for requests...
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         [Thread 0x16d2eb000]: [Handler] logClientInfo(): GET /admin/metrics HTTP/1.1\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         Host: 192.168.12.109\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         Connection: keep-alive\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         Authorization: Basic YWRtaW46bGFtdHJhbjEyMzQ=\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         DNT: 1\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         Accept: */*\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         Referer: http://192.168.12.109/\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         Accept-Encoding: gzip, deflate\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         Accept-Language: en-US,en;q=0.9\x0D
+15:01:35.746620291 [714295] Server.cpp:97                LOG_INFO      root         \x0D
+=================================================================
+==68809==ERROR: AddressSanitizer: heap-use-after-free on address 0x617000020300 at pc 0x00010383969c bp 0x00016d2e95b0 sp 0x00016d2e8d60
+READ of size 731 at 0x617000020300 thread T4
+    #0 0x000103839698 in __asan_memmove+0x1b4 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x85698)
+    #1 0x000102de3af4 in decltype(fp0) std::__1::__formatter::__write_string_no_precision[abi:ne200100]<char, std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>>(std::__1::basic_string_view<char, std::__1::char_traits<char>>, std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, std::__1::__format_spec::__parsed_specifications<char>) formatter_output.h:308
+    #2 0x000102ddfb8c in decltype(auto) std::__1::__visit_format_arg[abi:ne200100]<char const* std::__1::__format::__handle_replacement_field[abi:ne200100]<char const*, std::__1::basic_format_parse_context<char>, std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>>(char const*, char const*, std::__1::basic_format_parse_context<char>&, std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>&)::'lambda'(char const*), std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>>(char const*&&, std::__1::basic_format_arg<std::__1::basic_format_parse_context<char>>) format_arg.h:141
+    #3 0x000102ddf424 in char const* std::__1::__format::__handle_replacement_field[abi:ne200100]<char const*, std::__1::basic_format_parse_context<char>, std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>>(char const*, char const*, std::__1::basic_format_parse_context<char>&, std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>&) format_functions.h:275
+    #4 0x000102ddf0c0 in std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>::iterator std::__1::__format::__vformat_to[abi:ne200100]<std::__1::basic_format_parse_context<char>, std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>>(std::__1::basic_format_parse_context<char>&&, std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>&&) format_functions.h:314
+    #5 0x000102ddece8 in std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>> std::__1::__vformat_to[abi:ne200100]<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char, std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>>(std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, std::__1::basic_string_view<char, std::__1::char_traits<char>>, std::__1::basic_format_args<std::__1::basic_format_context<std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, char>>) format_functions.h:410
+    #6 0x000102dc24d4 in HDE::Server::handler(HDE::AddressQueue&, HDE::ResponderQueue&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*) Server.cpp:1352
+    #7 0x000102e0b624 in void* std::__1::__thread_proxy[abi:ne200100]<std::__1::tuple<std::__1::unique_ptr<std::__1::__thread_struct, std::__1::default_delete<std::__1::__thread_struct>>, void (HDE::Server::*)(HDE::AddressQueue&, HDE::ResponderQueue&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*), HDE::Server*, std::__1::reference_wrapper<HDE::AddressQueue>, std::__1::reference_wrapper<HDE::ResponderQueue>, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*>>(void*) thread.h:214
+    #8 0x0001037ee3f4 in asan_thread_start(void*)+0x4c (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x3a3f4)
+    #9 0x00019f295c04 in _pthread_start+0x84 (libsystem_pthread.dylib:arm64e+0x6c04)
+    #10 0x00019f290ba4 in thread_start+0x4 (libsystem_pthread.dylib:arm64e+0x1ba4)
+
+0x617000020300 is located 0 bytes inside of 736-byte region [0x617000020300,0x6170000205e0)
+freed by thread T4 here:
+    #0 0x0001037ff82c in _ZdlPv+0x74 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x4b82c),
+    #1 0x000102dc23f0 in HDE::Server::handler(HDE::AddressQueue&, HDE::ResponderQueue&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*) Server.cpp:1351
+    #2 0x000102e0b624 in void* std::__1::__thread_proxy[abi:ne200100]<std::__1::tuple<std::__1::unique_ptr<std::__1::__thread_struct, std::__1::default_delete<std::__1::__thread_struct>>, void (HDE::Server::*)(HDE::AddressQueue&, HDE::ResponderQueue&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*), HDE::Server*, std::__1::reference_wrapper<HDE::AddressQueue>, std::__1::reference_wrapper<HDE::ResponderQueue>, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*>>(void*) thread.h:214
+    #3 0x0001037ee3f4 in asan_thread_start(void*)+0x4c (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x3a3f4)
+    #4 0x00019f295c04 in _pthread_start+0x84 (libsystem_pthread.dylib:arm64e+0x6c04)
+    #5 0x00019f290ba4 in thread_start+0x4 (libsystem_pthread.dylib:arm64e+0x1ba4)
+
+previously allocated by thread T4 here:
+    #0 0x0001037ff404 in _Znwm+0x74 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x4b404)
+    #1 0x000102dc7a38 in HDE::ServerMetrics::get_metrics_json() const Server.cpp:910
+    #2 0x000102dc21d4 in HDE::Server::handler(HDE::AddressQueue&, HDE::ResponderQueue&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*) Server.cpp:1351
+    #3 0x000102e0b624 in void* std::__1::__thread_proxy[abi:ne200100]<std::__1::tuple<std::__1::unique_ptr<std::__1::__thread_struct, std::__1::default_delete<std::__1::__thread_struct>>, void (HDE::Server::*)(HDE::AddressQueue&, HDE::ResponderQueue&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*), HDE::Server*, std::__1::reference_wrapper<HDE::AddressQueue>, std::__1::reference_wrapper<HDE::ResponderQueue>, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*>>(void*) thread.h:214
+    #4 0x0001037ee3f4 in asan_thread_start(void*)+0x4c (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x3a3f4)
+    #5 0x00019f295c04 in _pthread_start+0x84 (libsystem_pthread.dylib:arm64e+0x6c04)
+    #6 0x00019f290ba4 in thread_start+0x4 (libsystem_pthread.dylib:arm64e+0x1ba4)
+
+Thread T4 created by T0 here:
+    #0 0x0001037e99d4 in pthread_create+0x5c (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x359d4)
+    #1 0x000102e0b2e4 in std::__1::thread::thread<void (HDE::Server::*)(HDE::AddressQueue&, HDE::ResponderQueue&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*), HDE::Server*, std::__1::reference_wrapper<HDE::AddressQueue>, std::__1::reference_wrapper<HDE::ResponderQueue>, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*&, 0>(void (HDE::Server::*&&)(HDE::AddressQueue&, HDE::ResponderQueue&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*), HDE::Server*&&, std::__1::reference_wrapper<HDE::AddressQueue>&&, std::__1::reference_wrapper<HDE::ResponderQueue>&&, quill::v10::LoggerImpl<quill::v10::FrontendOptions>*&) thread.h:224
+    #2 0x000102db96f8 in HDE::Server::launch(quill::v10::LoggerImpl<quill::v10::FrontendOptions>*) Server.cpp:1696
+    #3 0x000102dbabac in HDE::Server::Server(quill::v10::LoggerImpl<quill::v10::FrontendOptions>*) Server.cpp:311
+    #4 0x000102d41aa8 in main main.cpp:8
+    #5 0x00019eecdd50  (<unknown module>)
+
+SUMMARY: AddressSanitizer: heap-use-after-free formatter_output.h:308 in decltype(fp0) std::__1::__formatter::__write_string_no_precision[abi:ne200100]<char, std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>>(std::__1::basic_string_view<char, std::__1::char_traits<char>>, std::__1::back_insert_iterator<std::__1::__format::__output_buffer<char>>, std::__1::__format_spec::__parsed_specifications<char>)
+Shadow bytes around the buggy address:
+  0x617000020080: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x617000020100: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x617000020180: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x617000020200: fd fd fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x617000020280: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+=>0x617000020300:[fd]fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x617000020380: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x617000020400: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x617000020480: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x617000020500: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x617000020580: fd fd fd fd fd fd fd fd fd fd fd fd fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==68809==ABORTING
+zsh: abort      ./main

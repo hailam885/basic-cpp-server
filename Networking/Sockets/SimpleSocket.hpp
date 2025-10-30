@@ -7,6 +7,13 @@
 #include <iostream>
 
 #define CACHE_LINE_SIZE (128)
+#define M2_PAGE_SIZE (16384)
+// (ARM64 ONLY FEATURES)
+#define M2_YIELD() __builtin_arm_yield()
+#define M2_DMB_ISH() __asm__ __volatile__("dmb ish" ::: "memory")
+#define M2_DSB_SY() __asm__ __volatile__("dsb sy" ::: "memory")
+#define M2_PREFETCH_READ(addr) __builtin_prefetch((addr), 0, 3)
+#define M2_PREFETCH_WRITE(addr) __builtin_prefetch((addr), 1, 3)
 
 //use AF_INET6 for IPv6, AF_INET for IPv4
 

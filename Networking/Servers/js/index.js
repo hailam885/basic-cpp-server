@@ -49,12 +49,8 @@ async function updateLiveStats() {
             const metrics = await response.json();
             // Update stats with real data
             const uptimeHours = Math.floor(metrics.uptime_seconds / 3600);
-            document.getElementById('stat-uptime').textContent = 
-                uptimeHours > 24 ? Math.floor(uptimeHours / 24) + 'd' : uptimeHours + 'h';
-            document.getElementById('stat-requests').textContent = 
-                metrics.total_requests > 1000 ? 
-                (metrics.total_requests / 1000).toFixed(1) + 'K+' : 
-                metrics.total_requests;
+            document.getElementById('stat-uptime').textContent = uptimeHours > 24 ? Math.floor(uptimeHours / 24) + 'd' : uptimeHours + 'h';
+            document.getElementById('stat-requests').textContent = metrics.total_requests > 1000 ? (metrics.total_requests / 1000).toFixed(1) + 'K+' : (metrics.total_requests > 1000000 ? (metrics.total_requests / 1000000).toFixed(1) + 'M+' : (metrics.total_requests > 1000000000 ? (metrics.total_requests / 1000000000).toFixed(1) + 'B+' : metrics.total_requests));
         }
     } catch (error) {
         // Use default values if metrics unavailable

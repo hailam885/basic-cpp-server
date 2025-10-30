@@ -24,7 +24,49 @@
             </div>
         </div>
         
-        <!-- Metrics Grid -->
+        <!-- System Resources Section -->
+        <div class="section-title">System Resources</div>
+        <div class="grid">
+            <div class="card">
+                <h3>CPU Usage</h3>
+                <div class="value" id="cpu-usage">0%</div>
+                <div class="segmented-bar">
+                    <div class="segment segment-user" id="cpu-user-segment"></div>
+                    <div class="segment segment-system" id="cpu-system-segment"></div>
+                    <div class="segment segment-idle" id="cpu-idle-segment"></div>
+                </div>
+                <div class="segment-labels">
+                    <span><span class="color-box" style="background: #3b82f6;"></span> User: <span id="cpu-user">0%</span></span>
+                    <span><span class="color-box" style="background: #f59e0b;"></span> System: <span id="cpu-system">0%</span></span>
+                    <span><span class="color-box" style="background: #6b7280;"></span> Idle: <span id="cpu-idle">0%</span></span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>Memory Usage</h3>
+                <div class="value">
+                    <span id="memory-usage">0 MB</span>
+                    <span class="value-separator">/</span>
+                    <span class="value-total" id="total-memory">0 GB</span>
+                </div>
+                <div class="segmented-bar">
+                    <div class="segment segment-active" id="mem-active-segment"></div>
+                    <div class="segment segment-wired" id="mem-wired-segment"></div>
+                    <div class="segment segment-compressed" id="mem-compressed-segment"></div>
+                    <div class="segment segment-free" id="mem-free-segment"></div>
+                </div>
+                <div class="segment-labels">
+                    <span><span class="color-box" style="background: #ef4444;"></span> Active: <span id="mem-active">0%</span></span>
+                    <span><span class="color-box" style="background: #f59e0b;"></span> Wired: <span id="mem-wired">0%</span></span>
+                    <span><span class="color-box" style="background: #8b5cf6;"></span> Compressed: <span id="mem-compressed">0%</span></span>
+                    <span><span class="color-box" style="background: #10b981;"></span> Free: <span id="mem-free">0%</span></span>
+                </div>
+                <div class="label" id="memory-percent">0% of total</div>
+            </div>
+        </div>
+
+        <!-- Performance Metrics Section -->
+        <div class="section-title">Performance Metrics</div>
         <div class="grid">
             <div class="card">
                 <h3>Uptime</h3>
@@ -39,9 +81,15 @@
             </div>
             
             <div class="card">
-                <h3>Requests/Second</h3>
+                <h3>Current RPS</h3>
+                <div class="value" id="instant-rps">0.00</div>
+                <div class="label">Requests per second (now)</div>
+            </div>
+            
+            <div class="card">
+                <h3>Average RPS</h3>
                 <div class="value" id="req-per-sec">0.00</div>
-                <div class="label">Average rate</div>
+                <div class="label">Overall average rate</div>
             </div>
             
             <div class="card">
@@ -50,6 +98,16 @@
                 <div class="label">Successful requests</div>
             </div>
             
+            <div class="card">
+                <h3>Active Threads</h3>
+                <div class="value" id="thread-count">0</div>
+                <div class="label">Worker threads</div>
+            </div>
+        </div>
+
+        <!-- Network Traffic Section -->
+        <div class="section-title">Network Traffic</div>
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
             <div class="card">
                 <h3>Data Sent</h3>
                 <div class="value" id="bytes-sent">0 KB</div>
@@ -91,7 +149,10 @@
                 </div>
             </div>
         </div>
+        <br>
         <p>Do not check the website's logs during reloading cache, check the server system logs.</p>
+        <br>
+        <p>The only valid function is reload cache. Clear cache/shut down server probably doesn't work</p>
     </div>
     
     <script src="../js/control_panel.js"></script>
