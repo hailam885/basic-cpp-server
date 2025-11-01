@@ -24,5 +24,10 @@ Additional advantages of M2:
 Clang 18.1.8
 C++23
 
-(Benchmark will probably not coming soon since code WILL randomly SEGFAULTs and catastrophic errors are probably undetectable)
+(Benchmark will probably not coming soon since code WILL randomly SEGFAULTs and catastrophic errors are probably undetectable, and also GPU-Accelerated request parsing is causing major refactoring to the codebase so it's probably going to be a while)
 
+
+
+(Optional: Updates)
+
+[10/30/2025]: Just now thought that GPUs can do most of the request parsing work. Probably take until 2026 for the code to be stable

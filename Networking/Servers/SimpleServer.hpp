@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <ctime>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <execution>
 #include <filesystem>
@@ -49,6 +50,7 @@
 #include "quill/sinks/ConsoleSink.h"
 #include "quill/std/WideString.h"
 #include <regex>
+#include <sched.h>
 #include <shared_mutex>
 //#include <simd/simd.h>
 #include <stdexcept>
@@ -135,12 +137,12 @@ struct Response {
 template <typename T, size_t Capacity>
 class OptimizedQueue {
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be power of 2");
-    static_assert(sizeof(T) + sizeof(std::atomic<uint64_t>) <= CACHE_LINE_SIZE, "T should fit in cache line");
+    static_assert(sizeof(T) <= CACHE_LINE_SIZE, "T should fit in cache line");
     private:
         struct alignas(CACHE_LINE_SIZE) Slot {
             std::atomic<uint64_t> sequence;
             T data;
-            char padding[CACHE_LINE_SIZE - sizeof(std::atomic<uint64_t>) - sizeof(T)];
+            //char padding[CACHE_LINE_SIZE - sizeof(std::atomic<uint64_t>) - sizeof(T)];
         };
         alignas(M2_PAGE_SIZE) Slot buffer[Capacity];
         alignas(CACHE_LINE_SIZE) struct {

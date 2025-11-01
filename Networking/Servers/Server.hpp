@@ -1,12 +1,168 @@
 #ifndef Server_hpp
 #define Server_hpp
-
 #include "SimpleServer.hpp"
-//#include <Metal/Metal.h>
-//#include <simd/simd.h>
-#include <Foundation/Foundation.hpp>
-#include <Metal/Metal.hpp>
-#include <QuartzCore/QuartzCore.hpp>
+
+
+//If code is commented out do not question
+
+
+//#include <Foundation/Foundation.hpp>
+//#include <Metal/Metal.hpp>
+//#include <QuartzCore/QuartzCore.hpp>
+
+//Fwd declare, do not question code
+namespace MTL {
+    class Device;
+    class CommandQueue;
+    class CommandBuffer;
+    class CommandEncoder;
+    class RenderCommandEncoder;
+    class ParallelRenderCommandEncoder;
+    class BlitCommandEncoder;
+    class ComputeCommandEncoder;
+    class AccelerationStructure;
+    class AccelerationStructureCommandEncoder;
+    class AccelerationStructureDescriptor;
+    class PrimitiveAccelerationStructureDescriptor;
+    class InstanceAccelerationStructureDescriptor;
+    class Resource;
+    class Buffer;
+    class Texture;
+    class Heap;
+    class Fence;
+    class Event;
+    class SharedEvent;
+    class SamplerState;
+    class DepthStencilState;
+    class RenderPipelineState;
+    class ComputePipelineState;
+    class TileRenderPipelineState;
+    class RenderPipelineDescriptor;
+    class ComputePipelineDescriptor;
+    class TileRenderPipelineDescriptor;
+    class RenderPassDescriptor;
+    class RenderPassAttachmentDescriptor;
+    class RenderPassColorAttachmentDescriptor;
+    class RenderPassDepthAttachmentDescriptor;
+    class RenderPassStencilAttachmentDescriptor;
+    class TextureDescriptor;
+    class SamplerDescriptor;
+    class DepthStencilDescriptor;
+    class HeapDescriptor;
+    class BufferLayoutDescriptor;
+    class AttributeDescriptor;
+    class VertexDescriptor;
+    class StencilDescriptor;
+    class Library;
+    class Function;
+    class FunctionConstantValues;
+    class FunctionDescriptor;
+    class IntersectionFunctionDescriptor;
+    class LinkedFunctions;
+    class BinaryArchive;
+    class DynamicLibrary;
+    class Argument;
+    class ArgumentEncoder;
+    class ArgumentDescriptor;
+    class VisibleFunctionTable;
+    class IntersectionFunctionTable;
+    class IndirectCommandBuffer;
+    class IndirectCommandBufferDescriptor;
+    class IndirectRenderCommand;
+    class IndirectComputeCommand;
+    class Counter;
+    class CounterSet;
+    class CounterSampleBuffer;
+    class CounterSampleBufferDescriptor;
+    class RasterizationRateMap;
+    class RasterizationRateMapDescriptor;
+    class RasterizationRateSampleArray;
+    class RasterizationRateLayerDescriptor;
+    class RasterizationRateLayerArray;
+    class MeshRenderPipelineDescriptor;
+    class ResourceStateCommandEncoder;
+    class CaptureManager;
+    class CaptureDescriptor;
+    class CaptureScope;
+    class IOCommandQueue;
+    class IOCommandBuffer;
+    class IOScratchBuffer;
+    class IOScratchBufferAllocator;
+    class IOFileHandle;
+    class ResidencySet;
+    class ResidencySetDescriptor;
+    class Type;
+    class StructType;
+    class ArrayType;
+    class PointerType;
+    class TextureReferenceType;
+    class StructMember;
+    class VertexAttribute;
+    class Attribute;
+    class CompileOptions;
+    class Architecture;
+    class ArchitectureDescriptor;
+    class Drawable;
+    class BinaryArchiveDescriptor;
+    class BufferBinding;
+    class CommandQueueDescriptor;
+    class ComputePipelineReflection;
+    class FunctionHandle;
+    class IOCommandQueueDescriptor;
+    class LogState;
+    class LogStateDescriptor;
+    class RenderPipelineReflection;
+    class ResidencySet;
+    class ResourceViewPoolDescriptor;
+    struct SamplePosition;
+    class SharedEventHandle;
+    class SharedTextureHandle;
+    class StitchedLibraryDescriptor;
+    class Tensor;
+    class TensorDescriptor;
+    class TextureViewPool;
+    //struct Size;
+    //struct Origin;
+    //struct Region;
+}
+
+namespace MTL4 {
+    class Archive;
+    class ArgumentTable;
+    class ArgumentTableDescriptor;
+    class BinaryFunction;
+    class CommandAllocator;
+    class CommandAllocatorDescriptor;
+    class CommandBuffer;
+    class CommandQueue;
+    class CommandQueueDescriptor;
+    class Compiler;
+    class CompilerDescriptor;
+    class CounterHeap;
+    class CounterHeapDescriptor;
+    class PipelineDataSetSerializer;
+    class PipelineDataSetSerializerDescriptor;
+}
+
+namespace NS {
+    class Object;
+    class String;
+    class Error;
+    class Array;
+    class Dictionary;
+    class Number;
+    class Data;
+    class URL;
+    class Bundle;
+    class ProcessInfo;
+    class AutoreleasePool;
+    
+}
+
+namespace CA {
+    class MetalLayer;
+    class MetalDrawable;
+}
 
 //Server guide:
 
@@ -81,15 +237,6 @@ struct ParsedRequest {
     std::vector<std::pair<std::string_view, std::string_view>> query_str_parsed;
 };
 
-struct GPUParsedRequest {
-    unsigned int method;
-    unsigned int path_offset;
-    unsigned int path_length;
-    unsigned int version_valid;
-    unsigned int content_length;
-    unsigned int is_valid;
-};
-
 template <typename T, size_t N>
 class WaitFreeQueue;
 
@@ -105,22 +252,12 @@ public:
     static void pin_to_p_core(int core_id) {
         if (core_id < 0 || core_id > 3) throw std::runtime_error("P-core ID must be 0-3");
         thread_affinity_policy_data_t policy = {core_id};
-        thread_policy_set(
-            pthread_mach_thread_np(pthread_self()),
-            THREAD_AFFINITY_POLICY,
-            (thread_policy_t)&policy,
-            THREAD_AFFINITY_POLICY_COUNT
-        );
+        thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_AFFINITY_POLICY, reinterpret_cast<thread_policy_t>(&policy), THREAD_AFFINITY_POLICY_COUNT);
     }
     static void pin_to_e_core(int core_id) {
         if (core_id < 0 || core_id > 3) throw std::runtime_error("E-core ID must be 0-3");
         thread_affinity_policy_data_t policy = {4 + core_id};
-        thread_policy_set(
-            pthread_mach_thread_np(pthread_self()),
-            THREAD_AFFINITY_POLICY,
-            (thread_policy_t)&policy,
-            THREAD_AFFINITY_POLICY_COUNT
-        );
+        thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_AFFINITY_POLICY, reinterpret_cast<thread_policy_t>(&policy), THREAD_AFFINITY_POLICY_COUNT);
     }
     // Set Quality of Service (QoS) for thread scheduling
     static void set_qos_performance() {
@@ -129,6 +266,23 @@ public:
     static void set_qos_efficiency() {
         pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
     }
+};
+
+#pragma once
+#define MS_PRIVATE_IMPLEMENTATION
+#define CA_PRIVATE_IMPLEMENTATION
+#define MTL_PRIVATE_IMPLEMENTATION
+#include <Metal/Metal.hpp>
+#include <Foundation/Foundation.hpp>
+#include <cstdint>
+
+struct GPUParsedRequest {
+    unsigned int method; // 0=GET, 1=POST, 2=PUT, 3=DELETE, 4=HEAD, -1=INVALID
+    unsigned int path_offset;
+    unsigned int path_length;
+    unsigned int version_valid;
+    unsigned int content_length;
+    unsigned int is_valid;
 };
 
 namespace HDE {
@@ -212,8 +366,8 @@ namespace HDE {
         //if the acceper/handler/responder's thread count is 1, delete the thread_local in the variables before the infinite loops.
 
         //For accepter/responder, leave 1 thread for GPU-Accelerated Handler.
-        int threadsForAccepter = 1; //                  minimum 1
-        int threadsForResponder = 1; //                 minimum 1
+        int threadsForAccepter = 3; //                  minimum 1
+        int threadsForResponder = 3; //                 minimum 1
         int totalUsedThreads = threadsForAccepter + 1 + threadsForResponder; //handler defaults to 1 thread for now
         bool IO_SYNCHONIZATION = false; //              true / false                stability / performance
         int wait_before_notify_thread = 0; //           >>practically useless<<
@@ -307,7 +461,6 @@ namespace HDE {
         void get_memory_usage(uint64_t& used_bytes, double& percent) const;
         uint64_t get_total_memory() const;
         int get_memory_pressure() const;  // Returns 1=normal, 2=warn, 4=critical
-        
         struct MemoryBreakdown {
             uint64_t active;
             uint64_t wired;
@@ -340,240 +493,26 @@ namespace HDE {
     alignas(CACHE_LINE_SIZE * 8) inline serverStatus serverState;
     alignas(CACHE_LINE_SIZE) inline ServerMetrics server_metrics;
 
-    //The lion does not give a shit about the errors
     class M2GPUHTTPParser {
         private:
             MTL::Device* device;
             MTL::CommandQueue* command_queue;
             MTL::ComputePipelineState* parse_pipeline;
             MTL::ComputePipelineState* validate_pipeline;
-            MTL::Buffer* request_buffer;      // Raw HTTP requests
-            MTL::Buffer* parsed_buffer;       // Parsed results
-            MTL::Buffer* validation_buffer;   // Validation results
-            static constexpr size_t MAX_REQUEST_SIZE = 60721;
-            static constexpr size_t BATCH_SIZE = 1024;  // Process 1024 requests at once!
+            MTL::Buffer* request_buffer;
+            MTL::Buffer* parsed_buffer;
+            MTL::Buffer* validation_buffer;
+            //static constexpr size_t MAX_REQUEST_SIZE = 4096;
+            static constexpr size_t BATCH_SIZE = 1024;
+            const char* get_shader_source();
+            void compile_shaders();
         public:
-            M2GPUHTTPParser() {
-                device = MTL::CreateSystemDefaultDevice();
-                if (!device) throw std::runtime_error("Metal not supported on this system!");
-                NSLog(@"Using GPU: %@", [device name]);
-                NSLog(@"Unified Memory: %d", [device hasUnifiedMemory]);  // Should be YES on M2!
-                command_queue = device -> newCommandQueue();
-                compile_shaders();
-                // Allocate shared buffers
-                request_buffer = device -> newBufferWithLength(BATCH_SIZE * MAX_REQUEST_SIZE, MTL::ResourceStorageModeShared);
-                parsed_buffer = device -> newBufferWithLength(BATCH_SIZE * sizeof(GPUParsedRequest), MTL::ResourceStorageModeShared);
-                validation_buffer = device -> newBufferWithLength(BATCH_SIZE * sizeof(unsigned int), MTL::ResourceStorageModeShared);
-                NSLog(@"GPU Parser initialized. Batch size: %zu", BATCH_SIZE);
-            }
-
-            ~M2GPUHTTPParser() {
-                request_buffer -> release();
-                parsed_buffer -> release();
-                validation_buffer -> release();
-                parse_pipeline -> release();
-                validate_pipeline -> release();
-                command_queue -> release();
-                device -> release();
-            }
-
-            void compile_shaders() {
-                // Load shader source from file
-                NSError* error = nil;
-                NSString* shader_path = @"http_parser.metal";  // Your shader file
-                NSString* shader_source = [NSString stringWithContentsOfFile:shader_path encoding:NSUTF8StringEncoding error:&error];
-                if (error) {
-                    // Fallback: Use inline shader string
-                    shader_source = @R"(
-                        #include <metal_stdlib>
-                        using namespace metal;
-                        
-                        struct ParsedRequest {
-                            unsigned int method;
-                            unsigned int path_offset;
-                            unsigned int path_length;
-                            unsigned int version_valid;
-                            unsigned int content_length;
-                            unsigned int is_valid;
-                        };
-                        
-                        inline bool fast_compare(const device char* str, const char* literal, unsigned int len) {
-                            for (unsigned int i = 0; i < len; i++) {
-                                if (str[i] != literal[i]) return false;
-                            }
-                            return true;
-                        }
-                        
-                        kernel void parse_http_requests(
-                            device const char* requests [[buffer(0)]],
-                            device ParsedRequest* results [[buffer(1)]],
-                            constant unsigned int& request_size [[buffer(2)]],
-                            uint tid [[thread_position_in_grid]])
-                        {
-                            device const char* req = requests + (tid * request_size);
-                            device ParsedRequest& result = results[tid];
-                            
-                            result.method = 0xFFFFFFFF;
-                            result.path_offset = 0;
-                            result.path_length = 0;
-                            result.version_valid = 0;
-                            result.content_length = 0;
-                            result.is_valid = 0;
-                            
-                            if (fast_compare(req, "GET ", 4)) {
-                                result.method = 0;
-                            } else if (fast_compare(req, "POST ", 5)) {
-                                result.method = 1;
-                            } else if (fast_compare(req, "PUT ", 4)) {
-                                result.method = 2;
-                            } else if (fast_compare(req, "DELETE ", 7)) {
-                                result.method = 3;
-                            } else if (fast_compare(req, "HEAD ", 5)) {
-                                result.method = 4;
-                            } else {
-                                return;
-                            }
-                            
-                            unsigned int i = (result.method == 1 || result.method == 3) ? 
-                                        ((result.method == 1) ? 5 : 7) : 4;
-                            unsigned int path_start = i;
-                            
-                            while (i < request_size && req[i] != ' ' && req[i] != '?' && req[i] != '\r') {
-                                i++;
-                            }
-                            
-                            result.path_offset = path_start;
-                            result.path_length = i - path_start;
-                            
-                            while (i < request_size && req[i] != 'H') i++;
-                            
-                            if (i + 8 < request_size) {
-                                if (fast_compare(&req[i], "HTTP/1.1", 8) || fast_compare(&req[i], "HTTP/1.0", 8)) {
-                                    result.version_valid = 1;
-                                }
-                            }
-                            
-                            result.is_valid = (result.method != 0xFFFFFFFF && result.version_valid == 1) ? 1 : 0;
-                        }
-                        
-                        kernel void validate_urls(
-                            device const char* requests [[buffer(0)]],
-                            device const ParsedRequest* parsed [[buffer(1)]],
-                            device unsigned int* validation_results [[buffer(2)]],
-                            constant unsigned int& request_size [[buffer(3)]],
-                            uint tid [[thread_position_in_grid]])
-                        {
-                            device const ParsedRequest& req = parsed[tid];
-                            
-                            if (!req.is_valid) {
-                                validation_results[tid] = 0;
-                                return;
-                            }
-                            
-                            device const char* path = requests + (tid * request_size) + req.path_offset;
-                            unsigned int len = req.path_length;
-                            
-                            for (unsigned int i = 0; i < len - 1; i++) {
-                                if (path[i] == '.' && path[i+1] == '.') {
-                                    validation_results[tid] = 0;
-                                    return;
-                                }
-                            }
-                            
-                            for (unsigned int i = 0; i < len; i++) {
-                                if (path[i] == '\0') {
-                                    validation_results[tid] = 0;
-                                    return;
-                                }
-                            }
-                            
-                            if (len > 2048) {
-                                validation_results[tid] = 0;
-                                return;
-                            }
-                            
-                            for (unsigned int i = 0; i < len; i++) {
-                                char c = path[i];
-                                bool valid = (c >= 'a' && c <= 'z') ||
-                                            (c >= 'A' && c <= 'Z') ||
-                                            (c >= '0' && c <= '9') ||
-                                            c == '/' || c == '-' || c == '_' || c == '.';
-                                
-                                if (!valid) {
-                                    validation_results[tid] = 0;
-                                    return;
-                                }
-                            }
-                            
-                            validation_results[tid] = 1;
-                        }
-                    )";
-                }
-                // Compile Metal library
-                id<MTLLibrary> library = [device newLibraryWithSource:shader_source options:nil error:&error];
-                if (error) {
-                    NSLog(@"Metal compilation error: %@", error);
-                    throw std::runtime_error("Failed to compile Metal shaders");
-                }
-                // Create compute pipelines
-                id<MTLFunction> parse_func = [library newFunctionWithName:@"parse_http_requests"];
-                id<MTLFunction> validate_func = [library newFunctionWithName:@"validate_urls"];
-                parse_pipeline = [device newComputePipelineStateWithFunction:parse_func error:&error];
-                if (error) {
-                    NSLog(@"Parse pipeline error: %@", error);
-                    throw std::runtime_error("Failed to create parse pipeline");
-                }
-                validate_pipeline = device -> newComputePipelineStateWithFunction(validate_func, &error);
-                if (error) {
-                    NSLog(@"Validate pipeline error: %@", error);
-                    throw std::runtime_error("Failed to create validate pipeline");
-                }
-                library -> release();
-            }
-            
-            // Process batch of requests on GPU
-            void process_batch(const char** requests, size_t count, GPUParsedRequest* results, unsigned int* validations) {
-                if (count > BATCH_SIZE) throw std::runtime_error("Batch size exceeds maximum");
-                // Copy requests to shared buffer (CPU writes, GPU will read)
-                char* gpu_requests = (char*)[request_buffer contents];
-                for (size_t i = 0; i < count; i++) memcpy(gpu_requests + (i * MAX_REQUEST_SIZE), requests[i], MAX_REQUEST_SIZE);
-                // Create command buffer
-                id<MTLCommandBuffer> command_buffer = [command_queue commandBuffer];
-                id<MTLComputeCommandEncoder> encoder = [command_buffer computeCommandEncoder];
-                // ===== PARSING KERNEL =====
-                [encoder setComputePipelineState:parse_pipeline];
-                [encoder setBuffer:request_buffer offset:0 atIndex:0];
-                [encoder setBuffer:parsed_buffer offset:0 atIndex:1];
-                unsigned int request_size = MAX_REQUEST_SIZE;
-                [encoder setBytes:&request_size length:sizeof(unsigned int) atIndex:2];
-                // Dispatch threads (1 thread per request)
-                MTLSize grid_size = MTLSizeMake(count, 1, 1);
-                NSUInteger thread_group_size = parse_pipeline.maxTotalThreadsPerThreadgroup;
-                if (thread_group_size > count) thread_group_size = count;
-                MTLSize thread_group = MTLSizeMake(thread_group_size, 1, 1);
-                [encoder dispatchThreads:grid_size threadsPerThreadgroup:thread_group];
-                // ===== VALIDATION KERNEL =====
-                [encoder setComputePipelineState:validate_pipeline];
-                [encoder setBuffer:request_buffer offset:0 atIndex:0];
-                [encoder setBuffer:parsed_buffer offset:0 atIndex:1];
-                [encoder setBuffer:validation_buffer offset:0 atIndex:2];
-                [encoder setBytes:&request_size length:sizeof(unsigned int) atIndex:3];
-                thread_group_size = validate_pipeline.maxTotalThreadsPerThreadgroup;
-                if (thread_group_size > count) thread_group_size = count;
-                thread_group = MTLSizeMake(thread_group_size, 1, 1);
-                [encoder dispatchThreads:grid_size threadsPerThreadgroup:thread_group];
-                [encoder endEncoding];
-                // Execute on GPU
-                [command_buffer commit];
-                [command_buffer waitUntilCompleted];  // Block until GPU finishes
-                // Read results (GPU wrote, CPU reads - ZERO COPY!)
-                GPUParsedRequest* gpu_results = (GPUParsedRequest*)[parsed_buffer contents];
-                unsigned int* gpu_validations = (unsigned int*)[validation_buffer contents];
-                memcpy(results, gpu_results, count * sizeof(GPUParsedRequest));
-                memcpy(validations, gpu_validations, count * sizeof(unsigned int));
-            }
+            M2GPUHTTPParser();
+            ~M2GPUHTTPParser();
+            void process_batch(const char** requests, size_t count, GPUParsedRequest* results, uint32_t* validations);
             size_t get_batch_size() const { return BATCH_SIZE; }
-            size_t get_max_request_size() const { return MAX_REQUEST_SIZE; }
+            size_t get_max_request_size() const { return HDE::server_config.MAX_BUFFER_SIZE; }
+            MTL::Device* get_device() const { return device; }
     };
 
     inline std::unique_ptr<M2GPUHTTPParser> gpu_parser;
