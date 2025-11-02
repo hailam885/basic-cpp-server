@@ -4,9 +4,13 @@
 //If code is commented out do not question
 
 
-#include <Foundation/Foundation.hpp>
-#include <Metal/Metal.hpp>
-#include <QuartzCore/QuartzCore.hpp>
+#pragma once
+#define NS_PRIVATE_IMPLEMENTATION
+#define MTL_PRIVATE_IMPLEMENTATION
+#define CA_PRIVATE_IMPLEMENTATION
+#include "Foundation/Foundation.hpp"
+#include "Metal/Metal.hpp"
+#include "QuartzCore/QuartzCore.hpp"
 //dev notes
 //Developed for C++23.
 /*
@@ -54,8 +58,8 @@ if () [[likely/unlikely]] {
 * Never acquire a higher-priority lock while holding a lower one
 */
 
-//0x80000000 = 2147483648 -> -2147483647 (int)
-//0x8000000000000000 = 9223372036854775808 -> -9223372036854775807 (long long int/64-bit)
+//0x80000000 = 2147483648 -> -2147483647 (overflow)
+//0x8000000000000000 = 9223372036854775808 -> -9223372036854775807 (overflow)
 
 //in the future, if possible create a struct for each of these mutexes/conditional variables and add padding; but only do it for frequently-accessed ones.
 alignas(CACHE_LINE_SIZE) socklen_t addrlen = sizeof(struct sockaddr_in);
@@ -71,7 +75,7 @@ alignas(CACHE_LINE_SIZE) std::condition_variable resp_in_res_queue;
 //Main code, do not modify
 
 HDE::Server::Server(quill::Logger* logger) : SimpleServer(AF_INET, SOCK_STREAM, 0, HDE::server_config.PORT, INADDR_ANY, HDE::server_config.queueCount) {
-    launch(logger);
+    HDE::Server::launch(logger);
 }
 
 //Utilities
@@ -1557,7 +1561,7 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
 
 void HDE::Server::launch(quill::Logger* logger) {
     //Checking server configurations during start up
-    asm volatile("" ::: "memory"); //prevents the compiler from reordering memory operations, yes you can write asm inside c++
+    //asm volatile("" ::: "memory"); //prevents the compiler from reordering memory operations, yes you can write asm inside c++
     if (HDE::server_config.totalUsedThreads > HDE::NUM_THREADS && !HDE::server_config.disable_warnings) [[unlikely]] {
         LOG_WARNING(logger, "[Thread {}]: [Main Thread] WARNING: totalUsedThreads is more than the amount of threads in the system, 8. This may render other performance optimizations such as CPU core pinning useless", HDE::get_thread_id_cached(), HDE::server_config.totalUsedThreads, HDE::NUM_THREADS);
     } else if ((HDE::server_config.threadsForAccepter > HDE::NUM_THREADS - 1 || HDE::server_config.threadsForResponder > HDE::NUM_THREADS - 1) && !HDE::server_config.disable_warnings) [[unlikely]] {
@@ -1604,29 +1608,39 @@ void HDE::Server::launch(quill::Logger* logger) {
     }
     cache.load_static_files(file_routes_list, logger);
     //Configuring socket options
-    int opt = 1;
+    /*int opt = 1;
     setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
     setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_RCVBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
     setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_SNDBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
     #ifdef __APPLE__
         int tfo = 1;
         setsockopt(get_socket() -> get_sock(), IPPROTO_TCP, TCP_FASTOPEN, &tfo, sizeof(tfo));
-    #endif
+    #endif*/
+    std::cout << "1" << std::endl;
     std::ios_base::sync_with_stdio(HDE::server_config.IO_SYNCHONIZATION);
     HDE::AddressQueue address_queue;
+    std::cout << "2" << std::endl;
     HDE::ResponderQueue responder_queue;
+    std::cout << "3" << std::endl;
     std::vector<std::jthread> processes(HDE::server_config.totalUsedThreads);
+    std::cout << "4" << std::endl;
     //initialize the threads
     for (size_t i = 0; i < HDE::server_config.threadsForAccepter; ++i) {
         processes[i] = std::jthread(&HDE::Server::accepter, this, std::ref(address_queue), logger);
     }
+    std::cout << "5" << std::endl;
     for (size_t i = 0; i < HDE::server_config.threadsForResponder; ++i) { //1 thread for handler
         processes[i + HDE::server_config.threadsForAccepter] = std::jthread(&HDE::Server::responder, this, std::ref(responder_queue), logger);
     }
+    std::cout << "6" << std::endl;
     processes[processes.size() - 1] = std::jthread(&HDE::Server::handler, this, std::ref(address_queue), std::ref(responder_queue), logger);
     LOG_INFO(logger, "[Thread {}]: [Main Thread] Threads initialized.", HDE::get_thread_id_cached());
+    std::cout << "7" << std::endl;
     HDE::serverState.finished_initialization.store(true, std::memory_order_release);
-    for (int i = 0; i < processes.size(); ++i) finish_initialization.notify_all();
+    std::cout << "8" << std::endl;
+    for (int i = 0; i < processes.size(); ++i) {
+        finish_initialization.notify_all();
+    }
     LOG_INFO(logger, "[Thread {}]: [Main Thread] Main thread finished executing.", HDE::get_thread_id_cached());
 }
 

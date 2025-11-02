@@ -29,7 +29,7 @@ Compiling:
 
 Compiling for maximum performance binary, but longer compile times, bigger binaries, and complex debugging required:
 
-/usr/bin/clang++ -Wpedantic -ferror-limit=0 -O3 -std=c++23 -stdlib=libc++ -fcolor-diagnostics -fansi-escape-codes -fexperimental-library -I/Users/trangtran/Desktop/coding_files/a/Networking/Servers/metal-cpp -fsanitize=address -march=native -g /Users/trangtran/Desktop/coding_files/a/Networking/Servers/mtl_implementation.cpp -DNS_PRIVATE_IMPLEMENTATION -DMTL_PRIVATE_IMPLEMENTATION -DCA_PRIVATE_IMPLEMENTATION -framework Metal -framework Foundation -framework QuartzCore /Users/trangtran/Desktop/coding_files/a/Networking/Servers/main.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Servers/Server.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Servers/SimpleServer.cpp /Users/trangtran/Desktop/coding_files/a/Networking/hdelibc-networking.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/BindingSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/ConnectingSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/hdelibc-sockets.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/ListeningSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/SimpleSocket.cpp -o /Users/trangtran/Desktop/coding_files/a/Networking/Servers/main
+/usr/bin/clang++ -Wpedantic -ferror-limit=0 -std=c++23 -stdlib=libc++ -fcolor-diagnostics -fansi-escape-codes -fexperimental-library -I/Users/trangtran/Desktop/coding_files/a/Networking/Servers/metal-cpp -fsanitize=address -fsanitize=undefined -march=native -g3 /Users/trangtran/Desktop/coding_files/a/Networking/Servers/Server.cpp -DNS_PRIVATE_IMPLEMENTATION -DMTL_PRIVATE_IMPLEMENTATION -DCA_PRIVATE_IMPLEMENTATION -framework Metal -framework Foundation -framework QuartzCore /Users/trangtran/Desktop/coding_files/a/Networking/Servers/main.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Servers/SimpleServer.cpp /Users/trangtran/Desktop/coding_files/a/Networking/hdelibc-networking.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/BindingSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/ConnectingSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/hdelibc-sockets.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/ListeningSocket.cpp /Users/trangtran/Desktop/coding_files/a/Networking/Sockets/SimpleSocket.cpp -o /Users/trangtran/Desktop/coding_files/a/Networking/Servers/main
 
 Executing:
 
@@ -80,6 +80,7 @@ wrk -t8 -c200 -d300s http://192.168.12.109:80/
 
 
 /*
+Some initial benchmarks (outdated):
 trangtran@Mac ~ % ab -n 1000000 -c 250 http://192.168.12.109:80/ && wrk -t6 -c500 -d30s http://192.168.12.109:80/ && wrk -t8 -c1000 -d60s http://192.168.12.109:80/ && wrk -t8 -c200 -d300s http://192.168.12.109:80/
 This is ApacheBench, Version 2.3 <$Revision: 1913912 $>
 Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/

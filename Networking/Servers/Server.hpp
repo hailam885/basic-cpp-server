@@ -268,14 +268,6 @@ public:
     }
 };
 
-#pragma once
-#define MS_PRIVATE_IMPLEMENTATION
-#define CA_PRIVATE_IMPLEMENTATION
-#define MTL_PRIVATE_IMPLEMENTATION
-#include <Metal/Metal.hpp>
-#include <Foundation/Foundation.hpp>
-#include <cstdint>
-
 struct GPUParsedRequest {
     unsigned int method; // 0=GET, 1=POST, 2=PUT, 3=DELETE, 4=HEAD, -1=INVALID
     unsigned int path_offset;
@@ -367,7 +359,7 @@ namespace HDE {
 
         //For accepter/responder, leave 1 thread for GPU-Accelerated Handler.
         int threadsForAccepter = 3; //                  minimum 1
-        int threadsForResponder = 3; //                 minimum 1
+        int threadsForResponder = 4; //                 minimum 1
         int totalUsedThreads = threadsForAccepter + 1 + threadsForResponder; //handler defaults to 1 thread for now
         bool IO_SYNCHONIZATION = false; //              true / false                stability / performance
         int wait_before_notify_thread = 0; //           >>practically useless<<
