@@ -1,16 +1,16 @@
-#include "Server.hpp"
 
 
 //If code is commented out do not question
 
 
-#pragma once
+#define SERVER_CPP_IMPLEMENTATION
 #define NS_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION
 #define CA_PRIVATE_IMPLEMENTATION
 #include "Foundation/Foundation.hpp"
 #include "Metal/Metal.hpp"
 #include "QuartzCore/QuartzCore.hpp"
+#include "Server.hpp"
 //dev notes
 //Developed for C++23.
 /*
@@ -897,142 +897,357 @@ inline bool HDE::HTTPValidator::is_valid_query_string(std::string_view query_str
     return query_string.starts_with('?') && query_string.contains('=') && !query_string.contains(' ') && query_string.contains('/') && query_string.contains('#') && query_string.contains('$');
 }
 
-HDE::M2GPUHTTPParser::M2GPUHTTPParser() {
-    device = MTL::CreateSystemDefaultDevice();
-    if (!device) throw std::runtime_error("Metal not supported on this system");
-    std::cout << "Using GPU: " << device -> name() -> utf8String() << std::endl;
-    std::cout << "Unified Memory: " << (device -> hasUnifiedMemory() ? "YES" : "NO") << std::endl;
-    command_queue = device -> newCommandQueue();
-    if (!command_queue) throw std::runtime_error("Failed to create command queue");
-    compile_shaders();
-    request_buffer = device -> newBuffer(BATCH_SIZE * HDE::server_config.MAX_BUFFER_SIZE, MTL::ResourceStorageModeShared);
-    parsed_buffer = device -> newBuffer(BATCH_SIZE * sizeof(GPUParsedRequest), MTL::ResourceStorageModeShared);
-    validation_buffer = device -> newBuffer(BATCH_SIZE * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    if (!request_buffer || !parsed_buffer || !validation_buffer) throw std::runtime_error("Failed to allocate GPU buffers");
-    std::cout << "GPU Parser initialized. Batch size: " << BATCH_SIZE << std::endl;
-}
-
-HDE::M2GPUHTTPParser::~M2GPUHTTPParser() {
-    if (request_buffer) request_buffer -> release();
-    if (parsed_buffer) parsed_buffer -> release();
-    if (validation_buffer) validation_buffer -> release();
-    if (parse_pipeline) parse_pipeline -> release();
-    if (validate_pipeline) validate_pipeline -> release();
-    if (command_queue) command_queue -> release();
-    if (device) device -> release();
-}
-
-const char* HDE::M2GPUHTTPParser::get_shader_source() {
-    std::string a;
-    std::ifstream file("http_parser.metal");
-    if (file.is_open()) {
-        throw new std::runtime_error("File http_parser.metal has error opening. Fuck you");
-    } else {
-        std::string line;
-        while (std::getline(file, line)) {
-            a += (line + "\n");
+namespace HDE {
+//in the future try to upgrade to modern Metal 4 practices
+class M2GPUHTTPParser {
+private:
+    MTL::Device* device;
+    MTL::CommandQueue* command_queue;
+    MTL::ComputePipelineState* parse_pipeline;
+    MTL::ComputePipelineState* validate_pipeline;
+    static constexpr size_t RING_SIZE = HDE::server_config.ring_size;
+    struct BufferRing {
+        MTL::Buffer* request_buffers[RING_SIZE];     // Input: HTTP request text
+        MTL::Buffer* parsed_buffers[RING_SIZE];      // Output: parsed data
+        MTL::Buffer* validation_buffers[RING_SIZE];  // Output: validation flags
+        std::atomic<size_t> current_index{0};        // Current buffer slot
+    };
+    BufferRing buffers;
+    size_t max_request_size;   // defaults to MAX_BUFFER_SIZE in constructor
+    size_t batch_size;         // defaults to batch_size in constructor
+    NS::Error* error;
+    quill::Logger* logger;
+    void compile_shaders() {
+        std::ifstream shader_file("http_parser.metal");
+        if (!shader_file.is_open()) throw std::runtime_error("Cannot open http_parser.metal. Make sure the file exists in the current directory.");
+        std::string shader_source((std::istreambuf_iterator<char>(shader_file)), std::istreambuf_iterator<char>());
+        shader_file.close();
+        if (shader_source.empty()) throw std::runtime_error("http_parser.metal is empty");
+        LOG_INFO(logger, "Loaded shader source ({} bytes)", shader_source.size());
+        NS::String* source_str = NS::String::string(shader_source.c_str(), NS::UTF8StringEncoding);
+        MTL::CompileOptions* options = MTL::CompileOptions::alloc() -> init();
+        options -> setFastMathEnabled(HDE::server_config.fast_floating_point);
+        options -> setLanguageVersion(MTL::LanguageVersion2_4); // Use Metal 2.4 (stable, widely supported)
+        //options -> setLanguageVersion(MTL::LanguageVersion4_0);
+        //options -> setOptimizationLevel(MTL::LibraryOptimizationLevelDefault);
+        options -> setOptimizationLevel(HDE::server_config.optimize_for_bin_size ? MTL::LibraryOptimizationLevelDefault : MTL::LibraryOptimizationLevelSize);
+        MTL::Library* library = device -> newLibrary(source_str, options, &error);
+        options -> release();  // Clean up compile options
+        if (!library) {
+            std::string error_msg = error ? std::string(error -> localizedDescription() -> utf8String()) : "Unknown compilation error";
+            throw std::runtime_error("Metal shader compilation failed:\n" + error_msg);
+        }
+        LOG_INFO(logger, "Shader library compiled");
+        NS::String* parse_name = NS::String::string("parse_http_requests", NS::UTF8StringEncoding);
+        NS::String* validate_name = NS::String::string("validate_urls", NS::UTF8StringEncoding);
+        MTL::Function* parse_func = library -> newFunction(parse_name);
+        MTL::Function* validate_func = library -> newFunction(validate_name);
+        if (!parse_func) {
+            library->release();
+            throw std::runtime_error("Cannot find 'parse_http_requests' kernel in shader. Check http_parser.metal for correct function name.");
+        }
+        if (!validate_func) {
+            library -> release();
+            parse_func -> release();
+            throw std::runtime_error("Cannot find 'validate_urls' kernel in shader. Check http_parser.metal for correct function name.");
+        }
+        LOG_INFO(logger, "Found kernel functions: parse_http_requests, validate_urls");
+        // pipeline state = optimized, ready-to-execute GPU code
+        parse_pipeline = device -> newComputePipelineState(parse_func, &error);
+        if (!parse_pipeline) {
+            std::string error_msg = error ? std::string(error -> localizedDescription() -> utf8String()) : "Unknown error";
+            validate_func -> release();
+            parse_func -> release();
+            library -> release();
+            throw std::runtime_error("Failed to create parse pipeline:\n" + error_msg);
+        }
+        validate_pipeline = device -> newComputePipelineState(validate_func, &error);
+        if (!validate_pipeline) {
+            std::string error_msg = error ?
+                std::string(error -> localizedDescription() -> utf8String()) :
+                "Unknown error";
+            
+            parse_pipeline->release();
+            validate_func->release();
+            parse_func->release();
+            library->release();
+            
+            throw std::runtime_error(
+                "Failed to create validate pipeline:\n" + error_msg
+            );
+        }
+        
+        // -----------------------------------------------------------------------
+        // Log pipeline information
+        // -----------------------------------------------------------------------
+        size_t parse_threads = parse_pipeline->maxTotalThreadsPerThreadgroup();
+        size_t validate_threads = validate_pipeline->maxTotalThreadsPerThreadgroup();
+        
+        LOG_INFO(logger, "Parse pipeline: max {} threads/threadgroup", parse_threads);
+        LOG_INFO(logger, "Validate pipeline: max {} threads/threadgroup", validate_threads);
+        
+        // -----------------------------------------------------------------------
+        // Clean up temporary objects
+        // -----------------------------------------------------------------------
+        validate_func->release();
+        parse_func->release();
+        library->release();
+    }
+    void create_buffers() {
+        LOG_INFO(logger, "Allocating GPU buffers...");
+    
+        // Calculate buffer sizes
+        size_t request_size = batch_size * max_request_size;
+        size_t parsed_size = batch_size * sizeof(GPUParsedRequest);
+        size_t validation_size = batch_size * sizeof(uint32_t);
+        
+        LOG_INFO(logger, "  Request buffer: {:.2f} MB", request_size / 1024.0 / 1024.0);
+        LOG_INFO(logger, "  Parsed buffer: {:.2f} KB", parsed_size / 1024.0);
+        LOG_INFO(logger, "  Validation buffer: {:.2f} KB", validation_size / 1024.0);
+        
+        // -----------------------------------------------------------------------
+        // Allocate triple-buffered resources
+        // -----------------------------------------------------------------------
+        // Why triple buffering?
+        // - Buffer 0: GPU is reading/processing
+        // - Buffer 1: CPU is writing new data
+        // - Buffer 2: CPU is reading results
+        // All three operations happen simultaneously = maximum throughput!
+        
+        for (size_t i = 0; i < RING_SIZE; i++) {
+            // -------------------------------------------------------------------
+            // MTL::ResourceStorageModeShared:
+            // -------------------------------------------------------------------
+            // - CPU and GPU can both access this memory
+            // - On Apple Silicon (M1/M2/M3): This is unified memory - no copies!
+            // - On discrete GPUs: This requires CPU<->GPU transfers
+            // - Perfect for data that both CPU and GPU need to access
+            
+            buffers.request_buffers[i] = device->newBuffer(
+                request_size,
+                MTL::ResourceStorageModeShared
+            );
+            
+            buffers.parsed_buffers[i] = device->newBuffer(
+                parsed_size,
+                MTL::ResourceStorageModeShared
+            );
+            
+            buffers.validation_buffers[i] = device->newBuffer(
+                validation_size,
+                MTL::ResourceStorageModeShared
+            );
+            
+            // Check for allocation failures
+            if (!buffers.request_buffers[i] ||
+                !buffers.parsed_buffers[i] ||
+                !buffers.validation_buffers[i]) {
+                
+                // Clean up any successfully allocated buffers
+                for (size_t j = 0; j <= i; j++) {
+                    if (buffers.request_buffers[j]) buffers.request_buffers[j]->release();
+                    if (buffers.parsed_buffers[j]) buffers.parsed_buffers[j]->release();
+                    if (buffers.validation_buffers[j]) buffers.validation_buffers[j]->release();
+                }
+                
+                throw std::runtime_error(
+                    "Failed to allocate GPU buffers. "
+                    "System may be out of memory or batch size is too large."
+                );
+            }
+            
+            LOG_INFO(logger, "  Allocated buffer set {}/{}", i + 1, RING_SIZE);
         }
     }
-    const char* ptr = a.data();
-    return ptr;
-}
+    size_t get_next_buffer_index() {
+        // Atomically increment and wrap around
+        // Thread-safe: multiple threads can call this simultaneously
+        size_t idx = buffers.current_index.fetch_add(1, std::memory_order_relaxed);
+        return idx % RING_SIZE;  // 0, 1, 2, 0, 1, 2, ...
+    }
+public:
+    M2GPUHTTPParser(quill::Logger* logger, size_t max_req_size = HDE::server_config.MAX_BUFFER_SIZE, size_t batch_sz = HDE::server_config.batch_size) {
+        if (HDE::server_config.log_level != MINIMAL) LOG_DEBUG(logger, "Initializing GPU...");
+        this -> logger = logger;
+        max_request_size = max_req_size;
+        batch_size = batch_sz;
+        device = MTL::CreateSystemDefaultDevice();
+        if (!device) throw std::runtime_error("Metal is not supported on this device.");
+        if (!(device -> hasUnifiedMemory())) throw std::runtime_error("Device must support Unified Memory Architecture (UMA).");
+        //if (!(device -> supportsFamily(MTL::GPUFamilyMetal4))) throw std::runtime_error("Device doesn't support Metal 4.");
+        if (HDE::server_config.log_level != MINIMAL) {
+            LOG_DEBUG(logger, "GPU Device: {}", device -> name() -> utf8String());
+            LOG_DEBUG(logger, "Unified Memory: {}", device -> hasUnifiedMemory() ? "Yes (Apple Silicon)" : "No");
+            LOG_DEBUG(logger, "Max Buffer Size: {:.2f} GB", device -> maxBufferLength() / 1024.0 / 1024.0 / 1024.0);
+        }
+        command_queue = device -> newCommandQueue();
+        if (!command_queue) {
+            device -> release();
+            throw std::runtime_error("Failed to create command queue.");
+        }
+        if (HDE::server_config.log_level == FULL) LOG_DEBUG(logger, "Command queue initialized.");
+        //compile shaders
+        try {
+            compile_shaders();
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) LOG_INFO(logger, "Compiled GPU shaders successfully");
+        } catch (const std::exception& e) {
+            command_queue -> release();
+            device -> release();
+            throw;
+        }
+        //alloc gpu buffers
+        try {
+            create_buffers();
+            if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) LOG_INFO(logger, "GPU buffers allocated.");
+        } catch (const std::exception& e) {
+            parse_pipeline -> release();
+            validate_pipeline -> release();
+            command_queue -> release();
+            device -> release();
+            throw;
+        }
+        //request + parsed + validation buffers
+        size_t total_memory = RING_SIZE * (batch_size * max_request_size + batch_size * sizeof(GPUParsedRequest) + batch_size * sizeof(uint32_t));
+        if (HDE::server_config.log_level != MINIMAL) {
+            LOG_DEBUG(logger, "Configuration:");
+            LOG_DEBUG(logger, "  Max Request Size: {} bytes", max_request_size);
+            LOG_DEBUG(logger, "  Batch Size: {} requests", batch_size);
+            LOG_DEBUG(logger, "  Buffer Count: {} (triple buffering)", RING_SIZE);
+            LOG_DEBUG(logger, "  Total GPU Memory: {:.2f} MB", total_memory / 1024.0 / 1024.0);
+            LOG_INFO(logger, "==================================================");
+        }
+    }
 
-void HDE::M2GPUHTTPParser::compile_shaders() {
-    NS::Error* error = nullptr;
-    NS::String* source_str = NS::String::string(get_shader_source(), NS::UTF8StringEncoding);
-    MTL::CompileOptions* options = MTL::CompileOptions::alloc() -> init();
-    MTL::Library* library = device -> newLibrary(source_str, options, &error);
-    options -> release(); 
-    if (!library) {
-        if (error) {
-            std::string error_msg = error -> localizedDescription() -> utf8String();
-            throw std::runtime_error("Metal shader compilation failed: " + error_msg);
+    ~M2GPUHTTPParser() {
+        LOG_INFO(logger, "Shutting down GPU Parser...");
+        for (size_t i = 0; i < RING_SIZE; i++) {
+            if (buffers.request_buffers[i]) {
+                buffers.request_buffers[i] -> release();
+            }
+            if (buffers.parsed_buffers[i]) {
+                buffers.parsed_buffers[i] -> release();
+            }
+            if (buffers.validation_buffers[i]) {
+                buffers.validation_buffers[i] -> release();
+            }
         }
-        throw std::runtime_error("Metal shader compilation failed");
+        if (parse_pipeline) parse_pipeline -> release();
+        if (validate_pipeline) validate_pipeline -> release();
+        if (command_queue) command_queue -> release();
+        if (device) device -> release();
+        LOG_INFO(logger, "GPU Parser shutdown complete.");
     }
-    // Get kernel functions
-    NS::String* parse_name = NS::String::string("parse_http_requests", NS::UTF8StringEncoding);
-    NS::String* validate_name = NS::String::string("validate_urls", NS::UTF8StringEncoding); 
-    MTL::Function* parse_func = library -> newFunction(parse_name);
-    MTL::Function* validate_func = library -> newFunction(validate_name);
-    if (!parse_func || !validate_func) {
-        library -> release();
-        throw std::runtime_error("Failed to get kernel functions");
-    }
-    __builtin_prefetch(&parse_pipeline, 1, 3);
-    parse_pipeline = device -> newComputePipelineState(parse_func, &error); // Create pipeline states
-    if (!parse_pipeline) {
-        if (error) {
-            std::string error_msg = error -> localizedDescription() -> utf8String();
-            throw std::runtime_error("Failed to create parse pipeline: " + error_msg);
+    //Thread-safe
+    void process_batch_async(const char** requests, size_t count, GPUParsedRequest* results, uint32_t* validations, std::function<void()> completion_handler) {
+        if (count > batch_size) {
+            throw std::runtime_error("Batch size " + std::to_string(count) + " exceeds maximum " + std::to_string(batch_size));
         }
-        throw std::runtime_error("Failed to create parse pipeline");
-    }
-    __builtin_prefetch(&validate_pipeline, 1, 3);
-    validate_pipeline = device -> newComputePipelineState(validate_func, &error);
-    if (!validate_pipeline) {
-        if (error) {
-            std::string error_msg = error -> localizedDescription() -> utf8String();
-            throw std::runtime_error("Failed to create validate pipeline: " + error_msg);
+        if (count == 0) { //nothing to process
+            completion_handler();
+            return;
         }
-        throw std::runtime_error("Failed to create validate pipeline");
+        if (HDE::server_config.log_level == FULL) {
+            LOG_DEBUG(logger, "[GPU] Processing batch of {} requests (async)", count);
+        }
+        size_t buffer_idx = get_next_buffer_index();
+        MTL::Buffer* request_buffer = buffers.request_buffers[buffer_idx];
+        MTL::Buffer* parsed_buffer = buffers.parsed_buffers[buffer_idx];
+        MTL::Buffer* validation_buffer = buffers.validation_buffers[buffer_idx];
+        if (HDE::server_config.log_level == FULL) {
+            LOG_DEBUG(logger, "[GPU] Using buffer slot {}", buffer_idx);
+        }
+        char* gpu_memory = static_cast<char*>(request_buffer -> contents());
+        for (size_t i = 0; i < count; i++) {
+            char* dest = gpu_memory + (i * max_request_size);
+            size_t request_len = strlen(requests[i]);
+            size_t copy_len = std::min(request_len, max_request_size - 1);
+            memcpy(dest, requests[i], copy_len);
+            dest[copy_len] = '\0';
+        }
+        request_buffer -> didModifyRange(NS::Range::Make(0, count * max_request_size)); //hint that buffer is modified
+        if (HDE::server_config.log_level == FULL) {
+            LOG_DEBUG(logger, "[GPU] Copied {} requests to GPU memory", count);
+        }
+        MTL::CommandBuffer* cmd_buf = command_queue -> commandBuffer();
+        if (!cmd_buf) {
+            throw std::runtime_error("Failed to create command buffer");
+        }
+        cmd_buf -> setLabel(NS::String::string("HTTP Parser Batch", NS::UTF8StringEncoding));
+        MTL::ComputeCommandEncoder* encoder = cmd_buf -> computeCommandEncoder();
+        if (!encoder) {
+            throw std::runtime_error("Failed to create compute encoder");
+        }
+        encoder -> setComputePipelineState(parse_pipeline);
+        encoder -> setBuffer(request_buffer, 0, 0);   // [[buffer(0)]]
+        encoder -> setBuffer(parsed_buffer, 0, 1);    // [[buffer(1)]]
+        unsigned int max_size = static_cast<unsigned int>(max_request_size);
+        encoder -> setBytes(&max_size, sizeof(unsigned int), 2);  // [[buffer(2)]], set constant value (max request size)
+        MTL::Size grid_size = MTL::Size::Make(count, 1, 1); //calculate grid size (total threads needed)
+        size_t max_threads = parse_pipeline -> maxTotalThreadsPerThreadgroup();
+        size_t threads_per_group = std::min<size_t>(256, max_threads); // 256 is a good default for Apple GPUs
+        threads_per_group = (threads_per_group / 32) * 32;
+        if (threads_per_group == 0) threads_per_group = 32; //must be multiple of 32 (SIMD width on Apple GPUs)
+        MTL::Size threadgroup_size = MTL::Size::Make(threads_per_group, 1, 1);
+        encoder -> setThreadgroupMemoryLength(8192, 0); //allocate thread group memory
+        encoder -> dispatchThreads(grid_size, threadgroup_size);
+        if (HDE::server_config.log_level == FULL) {
+            LOG_DEBUG(logger, "[GPU] Dispatched parse kernel: {} threads in groups of {}", count, threads_per_group);
+        }
+        encoder -> setComputePipelineState(validate_pipeline);
+        encoder -> setBuffer(request_buffer, 0, 0);      // [[buffer(0)]]
+        encoder -> setBuffer(parsed_buffer, 0, 1);       // [[buffer(1)]]
+        encoder -> setBuffer(validation_buffer, 0, 2);   // [[buffer(2)]]
+        encoder -> setBytes(&max_size, sizeof(uint32_t), 3);  // [[buffer(3)]]
+        max_threads = validate_pipeline -> maxTotalThreadsPerThreadgroup();
+        threads_per_group = std::min<size_t>(256, max_threads);
+        threads_per_group = (threads_per_group / 32) * 32;
+        if (threads_per_group == 0) threads_per_group = 32;
+        threadgroup_size = MTL::Size::Make(threads_per_group, 1, 1);
+        encoder -> dispatchThreads(grid_size, threadgroup_size);
+        if (HDE::server_config.log_level == FULL) {
+            LOG_DEBUG(logger, "[GPU] Dispatched validate kernel");
+        }
+        encoder -> endEncoding();
+        cmd_buf -> addCompletedHandler([&](MTL::CommandBuffer* completed_buffer) {
+            MTL::CommandBufferStatus status = completed_buffer -> status();
+            if (status == MTL::CommandBufferStatusError) {
+                NS::Error* cmd_error = completed_buffer -> error();
+                if (cmd_error) {
+                    LOG_ERROR(logger, "[GPU] Command buffer failed: {}", cmd_error -> localizedDescription() -> utf8String());
+                } else {
+                    LOG_ERROR(logger, "[GPU] Command buffer failed with unknown error");
+                }
+                completion_handler(); // Still call completion handler to avoid deadlock
+                return;
+            }
+            //read results from memory
+            GPUParsedRequest* gpu_results =  static_cast<GPUParsedRequest*>(parsed_buffer -> contents());
+            uint32_t* gpu_validations = static_cast<uint32_t*>(validation_buffer -> contents());
+            memcpy(results, gpu_results, count * sizeof(GPUParsedRequest));
+            memcpy(validations, gpu_validations, count * sizeof(uint32_t));
+            if (HDE::server_config.log_level == FULL) {
+                LOG_DEBUG(logger, "[GPU] Copied {} results from buffer slot {}", count, buffer_idx);
+            }
+            completion_handler();
+        });
+        cmd_buf -> commit(); //submnit work to GPU
+        
+        if (HDE::server_config.log_level == FULL) {
+            LOG_DEBUG(logger, "[GPU] Command buffer submitted (async)");
+        }
+        //function ends here, completion handler will be called once GPU finishes
     }
-    parse_func -> release();
-    validate_func -> release();
-    library -> release();
-}
-
-void HDE::M2GPUHTTPParser::process_batch(const char** requests, size_t count, GPUParsedRequest* results, uint32_t* validations) {
-    if (count > BATCH_SIZE) throw std::runtime_error("Batch size exceeds maximum");
-    char* gpu_requests = static_cast<char*>(request_buffer -> contents()); //copy requests to shared buffer (CPU writes)
-    for (size_t i = 0; i < count; ++i) memcpy(gpu_requests + (i * HDE::server_config.MAX_BUFFER_SIZE), requests[i], HDE::server_config.MAX_BUFFER_SIZE);
-    __builtin_prefetch(&command_queue, 0, 3);
-    MTL::CommandBuffer* command_buffer = command_queue -> commandBuffer();
-    if (!command_buffer) throw std::runtime_error("Failed to create command buffer");
-    __builtin_prefetch(&command_buffer, 0, 3);
-    MTL::ComputeCommandEncoder* encoder = command_buffer -> computeCommandEncoder();
-    if (!encoder) throw std::runtime_error("Failed to create compute encoder");
-    __builtin_prefetch(&encoder, 1, 3);
-    __builtin_prefetch(&parse_pipeline, 0, 3);
-    encoder -> setComputePipelineState(parse_pipeline);
-    __builtin_prefetch(&request_buffer, 0, 3);
-    encoder -> setBuffer(request_buffer, 0, 0);
-    __builtin_prefetch(&parsed_buffer, 0, 3);
-    encoder -> setBuffer(parsed_buffer, 0, 1);
-    unsigned int request_size = HDE::server_config.MAX_BUFFER_SIZE;
-    __builtin_prefetch(&encoder, 1, 3);
-    encoder -> setBytes(&request_size, sizeof(unsigned int), 2);
-    MTL::Size grid_size = MTL::Size::Make(count, 1, 1); // Dispatch threads
-    NS::UInteger thread_group_size = parse_pipeline -> maxTotalThreadsPerThreadgroup();
-    if (thread_group_size > count) thread_group_size = count;
-    MTL::Size threads_per_group = MTL::Size::Make(thread_group_size, 1, 1);
-    __builtin_prefetch(&encoder, 1, 3);
-    encoder -> dispatchThreads(grid_size, threads_per_group);
-    __builtin_prefetch(&validate_pipeline, 0, 3);
-    encoder -> setComputePipelineState(validate_pipeline); //validation kernel
-    __builtin_prefetch(&request_buffer, 0, 3);
-    encoder -> setBuffer(request_buffer, 0, 0);
-    __builtin_prefetch(&parsed_buffer, 0, 3);
-    encoder -> setBuffer(parsed_buffer, 0, 1);
-    __builtin_prefetch(&validation_buffer, 0, 3);
-    encoder -> setBuffer(validation_buffer, 0, 2);
-    encoder -> setBytes(&request_size, sizeof(unsigned int), 3);
-    thread_group_size = validate_pipeline -> maxTotalThreadsPerThreadgroup();
-    if (thread_group_size > count) thread_group_size = count;
-    threads_per_group = MTL::Size::Make(thread_group_size, 1, 1);
-    __builtin_prefetch(&encoder, 1, 3);
-    encoder -> dispatchThreads(grid_size, threads_per_group);
-    encoder -> endEncoding();
-    __builtin_prefetch(&command_buffer, 0, 3);
-    command_buffer -> commit(); //execute
-    command_buffer -> waitUntilCompleted();
-    GPUParsedRequest* gpu_results = static_cast<GPUParsedRequest*>(parsed_buffer -> contents()); //reading results
-    uint32_t* gpu_validations = static_cast<uint32_t*>(validation_buffer -> contents());
-    __builtin_prefetch(results, 0, 3);
-    __builtin_prefetch(gpu_results, 0, 3);
-    memcpy(results, gpu_results, count * sizeof(GPUParsedRequest));
-    memcpy(validations, gpu_validations, count * sizeof(uint32_t));
-}
+    //Getters
+    size_t get_max_batch_size() const { return batch_size; }
+    size_t get_max_request_size() const { return max_request_size; }
+    std::string get_device_info() const {
+        if (!device) return "No Device.";
+        const char* name = device -> name() -> utf8String();
+        return std::string(name);
+    };
+};
+    inline std::unique_ptr<M2GPUHTTPParser> gpu_parser; 
+};
 
 //Runs on independent thread
 void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logger) {
@@ -1248,7 +1463,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
 void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue, quill::Logger* logger) {
     static std::atomic<int> handler_core_id{1};
     int my_core = handler_core_id.fetch_add(1, std::memory_order_relaxed);
-    M2ThreadAffinity::pin_to_p_core(my_core % 4);
+    M2ThreadAffinity::pin_to_p_core(my_core); //fix ts bruh
     M2ThreadAffinity::set_qos_performance();
     std::unique_lock<std::mutex> init_lock(HDE::serverState.init_mutex);
     std::unique_lock<std::mutex> addr_lock(HDE::serverState.address_queue_mutex, std::defer_lock);
@@ -1257,15 +1472,16 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
     finish_initialization.wait(init_lock, [] { 
         return HDE::serverState.finished_initialization.load(std::memory_order_acquire);
     });
-    LOG_NOTICE(logger, "[Thread {}]: [Handler] Initializing...", HDE::get_thread_id_cached());
+    LOG_NOTICE(logger, "[Thread {}]: [GPU-Accelerated Handler] Initializing...", HDE::get_thread_id_cached());
     init_lock.unlock();
     //Alloc once use forever principle
-    thread_local constexpr size_t BATCH_SIZE = 1024;
+    thread_local constexpr size_t BATCH_SIZE = HDE::server_config.batch_size;
     thread_local unsigned int validation_results[BATCH_SIZE];
     thread_local Request batch[BATCH_SIZE];
     thread_local const char* request_ptrs[BATCH_SIZE];
     thread_local GPUParsedRequest parsed_results[BATCH_SIZE];
     thread_local size_t batch_count = 0;
+    thread_local std::atomic<bool> gpu_busy{false};
     thread_local static const std::string_view bad_request_response = 
         "HTTP/1.1 400 Bad Request\r\n"
         "Content-Type: text/plain\r\n"
@@ -1308,21 +1524,34 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
             __builtin_prefetch(request_ptrs, 1, 3);
             request_ptrs[batch_count] = batch[batch_count].msg.c_str();
             batch_count++;
+            if (gpu_busy.load(std::memory_order_acquire)) if (batch_count > HDE::server_config.minimum_batch_size) break;
             if (batch_count >= 256 && address_queue.size() < 10) break; //don't want for full queue if batch draining
         }
-        __builtin_prefetch(&gpu_start, 1, 3);
-        gpu_start = std::chrono::high_resolution_clock::now();
-        __builtin_prefetch(&gpu_parser, 0, 3);
-        gpu_parser -> process_batch(request_ptrs, batch_count, parsed_results, validation_results); //try to use prefetch
-        __builtin_prefetch(&gpu_end, 1, 3);
-        gpu_end = std::chrono::high_resolution_clock::now();
-        __builtin_prefetch(&gpu_start, 0, 2);
-        __builtin_prefetch(&gpu_end, 0, 2);
-        __builtin_prefetch(&gpu_time, 1, 3);
-        gpu_time = std::chrono::duration_cast<std::chrono::microseconds>(gpu_end - gpu_start);
-        if (HDE::server_config.log_level == FULL) {
-            LOG_INFO(logger, "[Thread {}]: [GPU Handler] Processed {} requests in {}µs (GPU)", HDE::get_thread_id_cached(), batch_count, gpu_time.count());
+        if (batch_count == 0) continue;
+        if (HDE::server_config.log_level != MINIMAL || HDE::server_config.log_level != DECREASED) {
+            LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] A valid batch has formed. Processing...", HDE::get_thread_id_cached());
         }
+        if (HDE::server_config.enable_perf_timing_telemetry) {
+            __builtin_prefetch(&gpu_start, 1, 3);
+            gpu_start = std::chrono::high_resolution_clock::now();
+        }
+        gpu_busy.store(true, std::memory_order_release);
+        while (gpu_busy.load(std::memory_order_acquire)) __builtin_arm_yield(); // Wait for GPU to finish current batch
+        __builtin_prefetch(&gpu_parser, 0, 3);
+        gpu_parser -> process_batch_async(request_ptrs, batch_count, parsed_results, validation_results, [&]() {
+            gpu_busy.store(false, std::memory_order_release); // completion handler (called when GPU finishes)
+            if (HDE::server_config.enable_perf_timing_telemetry) {
+                __builtin_prefetch(&gpu_end, 1, 3);
+                gpu_end = std::chrono::high_resolution_clock::now();
+                __builtin_prefetch(&gpu_time, 1, 3);
+                gpu_time = std::chrono::duration_cast<std::chrono::microseconds>(gpu_end - gpu_start);
+                if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
+                    LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] Processed {} requests in {}µs (GPU)", HDE::get_thread_id_cached(), batch_count, gpu_time.count());
+                }
+            }
+            gpu_busy.store(false, std::memory_order_release);
+        });
+        while (gpu_busy.load(std::memory_order_acquire)) __builtin_arm_yield();
         //Post-Processing
         for (size_t i = 0; i < batch_count; i++) {
             const GPUParsedRequest& parsed = parsed_results[i];
@@ -1352,8 +1581,8 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
             __builtin_prefetch(&batch, 0, 2);
             __builtin_prefetch(&path, 1, 3);
             path = std::string_view(batch[i].msg.c_str() + parsed.path_offset, parsed.path_length);
-            M2_PREFETCH_READ(cache.get_response(path).data());
-            __builtin_prefetch(&response, 1, 3);
+            __builtin_prefetch(&response, 1, 2);
+            __builtin_prefetch((cache.get_response(path).data()), 0, 3);
             response = cache.get_response(path);
             __builtin_prefetch(&batch, 0, 2);
             __builtin_prefetch(&resp, 1, 3);
@@ -1365,11 +1594,11 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
             HDE::server_metrics.record_request(!is_404, batch[i].msg.length(), response.length());
         }
         if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-            LOG_INFO(logger, "[Thread {}]: [GPU Handler] Completed batch of {} requests", HDE::get_thread_id_cached(), batch_count);
+            LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] Completed batch of {} requests", HDE::get_thread_id_cached(), batch_count);
         }
         batch_count = 0;  // Reset for next batch
     }
-    LOG_NOTICE(logger, "[Thread {}]: [GPU Handler] Handler loop terminated.", HDE::get_thread_id_cached());
+    LOG_NOTICE(logger, "[Thread {}]: [GPU-Accelerated Handler] Handler loop terminated.", HDE::get_thread_id_cached());
     return;
 }
 //Runs on independent thread
@@ -1606,24 +1835,31 @@ void HDE::Server::launch(quill::Logger* logger) {
             LOG_NOTICE(logger, "[Thread {}]: [Main Thread] ADVICE: It is recommended to have max_responses_queue_size more than 10000, in case the amount of responses backs up during peak/extreme loads.", HDE::get_thread_id_cached());
         }
     }
+    try {
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] Initializing GPU parser...", HDE::get_thread_id_cached());
+        gpu_parser = std::make_unique<M2GPUHTTPParser>(logger, HDE::server_config.MAX_BUFFER_SIZE, 256);
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] GPU parser initialized successfully", HDE::get_thread_id_cached());
+        LOG_INFO(logger, "[Thread {}]: [Main Thread] Device: {}", HDE::get_thread_id_cached(), gpu_parser -> get_device_info());
+        
+    } catch (const std::exception& e) {
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] GPU parser initialization failed: {}", HDE::get_thread_id_cached(), e.what());
+        LOG_ERROR(logger, "[Thread {}]: [Main Thread] Server cannot start without GPU acceleration", HDE::get_thread_id_cached());
+        exit(EXIT_FAILURE);
+    }
     cache.load_static_files(file_routes_list, logger);
     //Configuring socket options
-    /*int opt = 1;
+    int opt = 1;
     setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
     setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_RCVBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
     setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_SNDBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
     #ifdef __APPLE__
         int tfo = 1;
         setsockopt(get_socket() -> get_sock(), IPPROTO_TCP, TCP_FASTOPEN, &tfo, sizeof(tfo));
-    #endif*/
-    std::cout << "1" << std::endl;
+    #endif
     std::ios_base::sync_with_stdio(HDE::server_config.IO_SYNCHONIZATION);
     HDE::AddressQueue address_queue;
-    std::cout << "2" << std::endl;
     HDE::ResponderQueue responder_queue;
-    std::cout << "3" << std::endl;
     std::vector<std::jthread> processes(HDE::server_config.totalUsedThreads);
-    std::cout << "4" << std::endl;
     //initialize the threads
     for (size_t i = 0; i < HDE::server_config.threadsForAccepter; ++i) {
         processes[i] = std::jthread(&HDE::Server::accepter, this, std::ref(address_queue), logger);

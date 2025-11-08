@@ -31,6 +31,7 @@
 #include <malloc/malloc.h>
 #include <malloc/_malloc.h>
 //#include <malloc.hpp>
+#include <memory>
 #include <mutex>
 #include <netdb.h>
 #include <netinet/bootp.h>
@@ -94,13 +95,7 @@
 #endif*/
 
 //to use alignas() specifier
-constexpr int returnNextBiggestPowerOfTwo(const int& num) {
-    int res = 1;
-    while (res < num) {
-        res *= 2;
-    }
-    return res;
-}
+constexpr int returnNextBiggestPowerOfTwo(const int& num);
 
 struct Request {
     alignas(CACHE_LINE_SIZE) int location = -1;
@@ -126,8 +121,8 @@ struct Response {
         else return false;
     }
     inline bool operator!=(const struct Response& other) {
-        if (destination == other.destination && msg == other.msg) return false;
-        else return true;
+        if (destination == other.destination && msg == other.msg) return true;
+        else return false;
     }
     Response() = default;
     Response(int dest, std::string_view message) : destination(dest), msg(message) {};
@@ -181,7 +176,7 @@ class OptimizedQueue {
             uint64_t pos = producer_cache.enqueue_pos;
             Slot& slot = buffer[pos & (Capacity - 1)];
             M2_PREFETCH_WRITE(&buffer[(pos + 1) & (Capacity - 1)]);
-            //__builtin_prefetch(&buffer[(pos + 1) & (Capacity - 1)], 1, 3);
+            //__builtin_prefetch((&buffer[(pos + 1) & (Capacity - 1)]), 1, 3);
             uint64_t seq = slot.sequence.load(std::memory_order_acquire); // arm64 load-exclusive: atomic read with exclusive monitor
             if (seq != pos) [[unlikely]] { // check if slot ready for writing
                 if (pos - producer_cache.cached_dequeue_pos >= Capacity) {
@@ -202,7 +197,7 @@ class OptimizedQueue {
             uint64_t pos = producer_cache.enqueue_pos;
             Slot& slot = buffer[pos & (Capacity - 1)];
             M2_PREFETCH_WRITE(&buffer[(pos + 1) & (Capacity - 1)]);
-            //__builtin_prefetch(&buffer[(pos + 1) & (Capacity - 1)]);
+            //__builtin_prefetch((&buffer[(pos + 1) & (Capacity - 1)]), 1, 3);
             uint64_t seq = slot.sequence.load(std::memory_order_acquire);
             if (seq != pos) [[unlikely]] {
                 if (pos - producer_cache.cached_dequeue_pos >= Capacity) {
@@ -223,7 +218,7 @@ class OptimizedQueue {
             uint64_t pos = consumer_cache.dequeue_pos;
             Slot& slot = buffer[pos & (Capacity - 1)];
             M2_PREFETCH_READ(&buffer[(pos + 1) & (Capacity - 1)]);
-            //__builtin_prefetch(&buffer[(pos + 1) & (Capacity - 1)]);
+            //__builtin_prefetch((&buffer[(pos + 1) & (Capacity - 1)]), 1, 3);
             uint64_t seq = slot.sequence.load(std::memory_order_acquire);
             if (seq != pos + 1) [[unlikely]] { //check if slot has data
                 if (pos >= consumer_cache.cached_enqueue_pos) {
@@ -232,6 +227,7 @@ class OptimizedQueue {
                 }
                 return false;
             }
+            return true;
         }
         size_t enqueue_batch(T* values, size_t count) noexcept { //batch operations alternative
             size_t enqueued = 0;
@@ -240,7 +236,7 @@ class OptimizedQueue {
             size_t i = 0;
             for (size_t chunk = 0; chunk < chunks; chunk++) {
                 M2_PREFETCH_WRITE(&buffer[(pos + i + 4) & (Capacity - 1)]); //prefecth 4 slots
-                //__builtin_prefetch(&buffer[(pos + i + 4) & (Capacity - 1)]);
+                //__builtin_prefetch((&buffer[(pos + i + 4) & (Capacity - 1)]), 1, 3);
                 for (size_t j = 0; j < 4; j++, i++) {
                     Slot& slot = buffer[(pos + i) & (Capacity - 1)];
                     uint64_t seq = slot.sequence.load(std::memory_order_acquire);
@@ -272,7 +268,7 @@ class OptimizedQueue {
             size_t i = 0;
             for (size_t chunk = 0; chunk < chunks; chunk++) {
                 M2_PREFETCH_READ(&buffer[(pos + i + 4) & (Capacity - 1)]);
-                //__builtin_prefetch(&buffer[(pos + i + 4) & (Capacity - 1)]);
+                //__builtin_prefetch((&buffer[(pos + i + 4) & (Capacity - 1)]), 1, 3);
                 for (size_t j = 0; j < 4; j++, i++) {
                     Slot& slot = buffer[(pos + i) & (Capacity - 1)];
                     uint64_t seq = slot.sequence.load(std::memory_order_acquire);
@@ -318,8 +314,8 @@ class OptimizedQueue {
 };
 
 namespace HDE {
-    using AddressQueue = OptimizedQueue<Request, 65536>;
-    using ResponderQueue = OptimizedQueue<Response, 65536>;
+    using AddressQueue = OptimizedQueue<Request, 16384>;
+    using ResponderQueue = OptimizedQueue<Response, 16384>;
     class SimpleServer {
         public:
             SimpleServer(int domain, int service, int protocol, int port, unsigned long interface, int bklg);

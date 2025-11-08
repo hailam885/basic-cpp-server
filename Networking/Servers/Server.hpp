@@ -10,160 +10,6 @@
 //#include <Metal/Metal.hpp>
 //#include <QuartzCore/QuartzCore.hpp>
 
-//Fwd declare, do not question code
-namespace MTL {
-    class Device;
-    class CommandQueue;
-    class CommandBuffer;
-    class CommandEncoder;
-    class RenderCommandEncoder;
-    class ParallelRenderCommandEncoder;
-    class BlitCommandEncoder;
-    class ComputeCommandEncoder;
-    class AccelerationStructure;
-    class AccelerationStructureCommandEncoder;
-    class AccelerationStructureDescriptor;
-    class PrimitiveAccelerationStructureDescriptor;
-    class InstanceAccelerationStructureDescriptor;
-    class Resource;
-    class Buffer;
-    class Texture;
-    class Heap;
-    class Fence;
-    class Event;
-    class SharedEvent;
-    class SamplerState;
-    class DepthStencilState;
-    class RenderPipelineState;
-    class ComputePipelineState;
-    class TileRenderPipelineState;
-    class RenderPipelineDescriptor;
-    class ComputePipelineDescriptor;
-    class TileRenderPipelineDescriptor;
-    class RenderPassDescriptor;
-    class RenderPassAttachmentDescriptor;
-    class RenderPassColorAttachmentDescriptor;
-    class RenderPassDepthAttachmentDescriptor;
-    class RenderPassStencilAttachmentDescriptor;
-    class TextureDescriptor;
-    class SamplerDescriptor;
-    class DepthStencilDescriptor;
-    class HeapDescriptor;
-    class BufferLayoutDescriptor;
-    class AttributeDescriptor;
-    class VertexDescriptor;
-    class StencilDescriptor;
-    class Library;
-    class Function;
-    class FunctionConstantValues;
-    class FunctionDescriptor;
-    class IntersectionFunctionDescriptor;
-    class LinkedFunctions;
-    class BinaryArchive;
-    class DynamicLibrary;
-    class Argument;
-    class ArgumentEncoder;
-    class ArgumentDescriptor;
-    class VisibleFunctionTable;
-    class IntersectionFunctionTable;
-    class IndirectCommandBuffer;
-    class IndirectCommandBufferDescriptor;
-    class IndirectRenderCommand;
-    class IndirectComputeCommand;
-    class Counter;
-    class CounterSet;
-    class CounterSampleBuffer;
-    class CounterSampleBufferDescriptor;
-    class RasterizationRateMap;
-    class RasterizationRateMapDescriptor;
-    class RasterizationRateSampleArray;
-    class RasterizationRateLayerDescriptor;
-    class RasterizationRateLayerArray;
-    class MeshRenderPipelineDescriptor;
-    class ResourceStateCommandEncoder;
-    class CaptureManager;
-    class CaptureDescriptor;
-    class CaptureScope;
-    class IOCommandQueue;
-    class IOCommandBuffer;
-    class IOScratchBuffer;
-    class IOScratchBufferAllocator;
-    class IOFileHandle;
-    class ResidencySet;
-    class ResidencySetDescriptor;
-    class Type;
-    class StructType;
-    class ArrayType;
-    class PointerType;
-    class TextureReferenceType;
-    class StructMember;
-    class VertexAttribute;
-    class Attribute;
-    class CompileOptions;
-    class Architecture;
-    class ArchitectureDescriptor;
-    class Drawable;
-    class BinaryArchiveDescriptor;
-    class BufferBinding;
-    class CommandQueueDescriptor;
-    class ComputePipelineReflection;
-    class FunctionHandle;
-    class IOCommandQueueDescriptor;
-    class LogState;
-    class LogStateDescriptor;
-    class RenderPipelineReflection;
-    class ResidencySet;
-    class ResourceViewPoolDescriptor;
-    struct SamplePosition;
-    class SharedEventHandle;
-    class SharedTextureHandle;
-    class StitchedLibraryDescriptor;
-    class Tensor;
-    class TensorDescriptor;
-    class TextureViewPool;
-    //struct Size;
-    //struct Origin;
-    //struct Region;
-}
-
-namespace MTL4 {
-    class Archive;
-    class ArgumentTable;
-    class ArgumentTableDescriptor;
-    class BinaryFunction;
-    class CommandAllocator;
-    class CommandAllocatorDescriptor;
-    class CommandBuffer;
-    class CommandQueue;
-    class CommandQueueDescriptor;
-    class Compiler;
-    class CompilerDescriptor;
-    class CounterHeap;
-    class CounterHeapDescriptor;
-    class PipelineDataSetSerializer;
-    class PipelineDataSetSerializerDescriptor;
-}
-
-namespace NS {
-    class Object;
-    class String;
-    class Error;
-    class Array;
-    class Dictionary;
-    class Number;
-    class Data;
-    class URL;
-    class Bundle;
-    class ProcessInfo;
-    class AutoreleasePool;
-    
-}
-
-namespace CA {
-    class MetalLayer;
-    class MetalDrawable;
-}
-
 //Server guide:
 
 //Benchmarking: set logs to minimal, turn off all other apps, disable enable_DoS_protection if needed, and benchmark with 100K, 1M, or 10M requests.
@@ -193,9 +39,7 @@ struct RateLimiter {
         auto now = std::chrono::steady_clock::now();
         size_t recent = 0;
         for (size_t i = 0; i < count; ++i) {
-            if (now - times[i] <= window) {
-                ++recent;
-            }
+            if (now - times[i] <= window) ++recent;
         }
         return recent;
     }
@@ -334,7 +178,7 @@ namespace HDE {
 
     //in the future try to combine all configurations into a struct and pass into cpu for effective cache line usage.
 
-    struct alignas(CACHE_LINE_SIZE) serverConfig {
+    struct alignas(CACHE_LINE_SIZE * 2) serverConfig {
         //All modified settings requires restart && recompilation, settings are hardcoded for performance.
 
         //              [ General ]
@@ -345,7 +189,7 @@ namespace HDE {
         int MAX_ADDRESS_QUEUE_SIZE = -1; //             -1 disables the limit
         int MAX_RESPONSES_QUEUE_SIZE = -1; //           -1 disables the limit
         const size_t MAX_BUFFER_SIZE = 30721; //        size in bytes, recommended to be 30K+ bytes
-        enum logLevel log_level = MINIMAL; //           FULL / DEFAULT / DECREASED / MINIMAL
+        enum logLevel log_level = FULL; //           FULL / DEFAULT / DECREASED / MINIMAL
         bool disable_logging = true; //                Fully disables logging besides the start up and config checking logs
         bool disable_warnings = false; //                Disables certain warnings
         int time_window_for_rps = 2; //                 Specifies the amount of time to count the requests to calculate instantaneous rps
@@ -363,14 +207,26 @@ namespace HDE {
         int totalUsedThreads = threadsForAccepter + 1 + threadsForResponder; //handler defaults to 1 thread for now
         bool IO_SYNCHONIZATION = false; //              true / false                stability / performance
         int wait_before_notify_thread = 0; //           >>practically useless<<
-        //int max_pos_file_size = 50; //                 possible size of the largest file in MBs, useful for certain optimizations
+        //int max_pos_file_size = 50; //                possible size of the largest file in MBs, useful for certain optimizations
 
         //              [ Security ]
 
         bool enable_DoS_protection = false; //          true / false, turns on rate limiting
+
+        //              [ 3D-Accelerated Configs ]      All settings related to 3D-Accelerated Client Request Parsing
+
+        bool enable_perf_timing_telemetry = true; //    Enables logging how long it takes to process batch (size + µs)
+        bool optimize_for_bin_size = true; //           0 -> High performance; 1 -> High executable compression ratio
+        bool fast_floating_point = true; //             true -> speed; false -> accuracy (not yet known if float calcs yet needed)
+        size_t num_command_queues = 4; //               Amount of parallel command queues for parallel encoding
+        size_t num_command_buffer = 8; //               For command buffer pool
+        size_t ring_size = 3; //                        Amount of buffering for buffer ring, leave as 3
+        size_t batch_size = 256; //                     Amount of requests per batch to send data efficiently to GPU
+        size_t heap_size = 512; //                      Size of heap in megabytes (MB)
+        size_t minimum_batch_size = 64; //              Higher -> high throughput, lower -> lower latency
     };
 
-    alignas(CACHE_LINE_SIZE) inline serverConfig server_config;
+    alignas(CACHE_LINE_SIZE * 2) constexpr serverConfig server_config;
 
     //Put every single html/css/js
     //always include a slash before the file type i.e. /pdf, /img, /jpeg
@@ -481,76 +337,10 @@ namespace HDE {
             static std::string base64_decode(std::string_view encoded);
     };
 
-    //creating structs
+    //creating structs/objects
     alignas(CACHE_LINE_SIZE * 8) inline serverStatus serverState;
     alignas(CACHE_LINE_SIZE) inline ServerMetrics server_metrics;
-
-    class M2GPUHTTPParser {
-        private:
-            MTL::Device* device;
-            MTL::CommandQueue* command_queue;
-            MTL::ComputePipelineState* parse_pipeline;
-            MTL::ComputePipelineState* validate_pipeline;
-            MTL::Buffer* request_buffer;
-            MTL::Buffer* parsed_buffer;
-            MTL::Buffer* validation_buffer;
-            //static constexpr size_t MAX_REQUEST_SIZE = 4096;
-            static constexpr size_t BATCH_SIZE = 1024;
-            const char* get_shader_source();
-            void compile_shaders();
-        public:
-            M2GPUHTTPParser();
-            ~M2GPUHTTPParser();
-            void process_batch(const char** requests, size_t count, GPUParsedRequest* results, uint32_t* validations);
-            size_t get_batch_size() const { return BATCH_SIZE; }
-            size_t get_max_request_size() const { return HDE::server_config.MAX_BUFFER_SIZE; }
-            MTL::Device* get_device() const { return device; }
-    };
-
-    inline std::unique_ptr<M2GPUHTTPParser> gpu_parser;
-
-    //Server configurations
-    //alignas(CACHE_LINE_SIZE) constexpr int queueCount = 10000000;
-    //alignas(CACHE_LINE_SIZE) constexpr int Port = 80;
-    //alignas(CACHE_LINE_SIZE) constexpr int MAX_CONNECTIONS_PER_SECOND = 40;
-
-    //Performance settings, requires server recompilation + restart to take effect, configurations is hard-coded into server to achieve maximum performance.
-
-    //Control memory usage lower -> less memory usage/buffer capacity; higher -> high memory usage/buffer capacity
-    //alignas(CACHE_LINE_SIZE) constexpr int max_incoming_address_queue_size = 50000;
-    //alignas(CACHE_LINE_SIZE) constexpr int max_responses_queue_size = 50000;
-
-    //It is recommended to have the handler's thread count more than the accepter's and responder's thread count.
-    //alignas(CACHE_LINE_SIZE) constexpr int threadsForAccepter = 2;
-    //alignas(CACHE_LINE_SIZE) constexpr int threadsForHandler = 4;
-    //alignas(CACHE_LINE_SIZE) constexpr int threadsForResponder = 2;
-    //alignas(CACHE_LINE_SIZE) constexpr int totalUsedThreads = threadsForAccepter + threadsForHandler + threadsForResponder;
-
-    //configures whether to limit the responder function from checking too much
-    //delay is 1000 / handler_responses_per_second (miliseconds) before checking the queue.
-    //alignas(CACHE_LINE_SIZE) constexpr bool continuous_responses = true;
-    //alignas(CACHE_LINE_SIZE) inline int handler_responses_per_second = 200;
-    //alignas(CACHE_LINE_SIZE) inline int responder_responses_per_second = 200;
-
-    //This feature ensures thread-safe compatibility between C's printf and C++'s stream operator. When [false], unexpected behavior might occur (only if the program mixes between C/C++ code). true -> server stability; false -> increased performance
-    //alignas(CACHE_LINE_SIZE) constexpr bool IOSynchronization = false;
-
-    //Typically the accepter functions will notify a thread as soon as a request is available. The limit here is to wait before the queue size gets past a certain limit to notify a thread. DO NOT turn this on yet, we do not have enough people to queue up; the server will just not process them.
-    //0 -> disabled, 1 -> limit by queue size, 2 -> limit by time
-    //right now the wait_before_notify_thread is default to 0, changing it doesn't change anything.
-    //alignas(CACHE_LINE_SIZE) constexpr int wait_before_notify_thread = 0;
-    //alignas(CACHE_LINE_SIZE) constexpr int queue_size_limit_before_notify = 20;
-
-    //Define the maximum limit in bytes a client's request can have; recommended to have 30000+.
-    //alignas(CACHE_LINE_SIZE) constexpr size_t MAX_BUFFER_SIZE = 30721;
-
-    //Logging Configurations
-    //Even logLevel::MINIMAL logs still produces logs, it's just one line per client; and the logs checking for config errors are run on startup no matter what log_level is set to.
-    //logLevel::FULL (Full & Debug Logs) / logLevel::DEFAULT / logLevel::DECREASED / logLevel::MINIMAL
-    //alignas(CACHE_LINE_SIZE) constexpr enum logLevel log_level = MINIMAL;
-
-    //Security Settings
-    //alignas(CACHE_LINE_SIZE) constexpr bool enable_DoS_protection = false;
+    class M2GPUHTTPParser;
 
     //Server-side declarations here, do not modify anything below this line
     extern std::unordered_map<std::string, RateLimiter> connection_history;
