@@ -220,7 +220,7 @@ async function exportMetrics() {
 async function shutdownServer() {
     const password = prompt('Enter admin password to shutdown server:');
     if (!password) return;
-    if (!confirm('⚠️ Are you ABSOLUTELY SURE you want to shutdown the server? This cannot be undone!')) {
+    if (!confirm('Are you ABSOLUTELY SURE you want to shutdown the server? This cannot be undone!')) {
         return;
     }
     addLog('Initiating graceful shutdown...', 'error');

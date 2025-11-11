@@ -57,8 +57,8 @@ inline RateLimitShard rate_limit_shards[NUM_RATE_LIMIT_SHARDS];
 //1024 bytes
 struct alignas(CACHE_LINE_SIZE * 8) serverStatus {
     serverStatus() = default;
-    mutable std::mutex address_queue_mutex;
-    mutable std::mutex responder_queue_mutex;
+    //mutable std::mutex address_queue_mutex;
+    //mutable std::mutex responder_queue_mutex;
     mutable std::mutex address_cv_mutex;
     mutable std::mutex response_cv_mutex;
     mutable std::mutex r_e_m_mutex;
@@ -78,13 +78,13 @@ struct ParsedRequest {
     std::string path;
     std::string_view version;
     bool valid = false;
-    std::vector<std::pair<std::string_view, std::string_view>> query_str_parsed;
+    std::vector<std::pair<std::string_view, std::string_view>> query_str_parsed; //for query strings
 };
 
 template <typename T, size_t N>
 class WaitFreeQueue;
 
-class GPUPacketProcessor;
+//class GPUPacketProcessor;
 
 class M2ThreadAffinity {
 public:
@@ -191,8 +191,9 @@ namespace HDE {
         const size_t MAX_BUFFER_SIZE = 30721; //        size in bytes, recommended to be 30K+ bytes
         enum logLevel log_level = FULL; //           FULL / DEFAULT / DECREASED / MINIMAL
         bool disable_logging = true; //                Fully disables logging besides the start up and config checking logs
-        bool disable_warnings = false; //                Disables certain warnings
+        bool disable_warnings = false; //               Disables certain warnings
         int time_window_for_rps = 2; //                 Specifies the amount of time to count the requests to calculate instantaneous rps
+        int max_retries_when_send_fail = 3; //          How many times should responder() reattempt sending data before giving up
         //backlog count are in a/Networking/Sockets/ListeningSocket.hpp, change the variable "backlog"
 
         //              [ Performance ]
@@ -201,7 +202,8 @@ namespace HDE {
         //Try to improve handler function efficiency. also the write() function in responder is extremely inefficient, look for faster and less overhead alternatives to the write() function.
         //if the acceper/handler/responder's thread count is 1, delete the thread_local in the variables before the infinite loops.
 
-        //For accepter/responder, leave 1 thread for GPU-Accelerated Handler.
+        //For accepter/responder, leave 1 remaining thread for GPU-Accelerated Handler.
+        //handler will probably receive a concurrent update in the future, currently single-threaded for now
         int threadsForAccepter = 3; //                  minimum 1
         int threadsForResponder = 4; //                 minimum 1
         int totalUsedThreads = threadsForAccepter + 1 + threadsForResponder; //handler defaults to 1 thread for now
@@ -216,22 +218,30 @@ namespace HDE {
         //              [ 3D-Accelerated Configs ]      All settings related to 3D-Accelerated Client Request Parsing
 
         bool enable_perf_timing_telemetry = true; //    Enables logging how long it takes to process batch (size + µs)
-        bool optimize_for_bin_size = true; //           0 -> High performance; 1 -> High executable compression ratio
-        bool fast_floating_point = true; //             true -> speed; false -> accuracy (not yet known if float calcs yet needed)
+        bool optimize_for_bin_size = true; //           false -> High performance; true -> High executable compression ratio
         size_t num_command_queues = 4; //               Amount of parallel command queues for parallel encoding
         size_t num_command_buffer = 8; //               For command buffer pool
         size_t ring_size = 3; //                        Amount of buffering for buffer ring, leave as 3
         size_t batch_size = 256; //                     Amount of requests per batch to send data efficiently to GPU
         size_t heap_size = 512; //                      Size of heap in megabytes (MB)
         size_t minimum_batch_size = 64; //              Higher -> high throughput, lower -> lower latency
+        int math_mode = 0; //                           0 -> Fast/Unsafe; 1 -> Balanced; 2 -> Slow/Safe
+
+        //              [ Debugging Only ]              HDE::logLevel::FULL in order to be useful
+
+        bool show_parsed_gpu_req = true; //             .
+        bool log_resp_before_send = true; //            .
+        
+        //char padding[CACHE_LINE_SIZE * 2 - sizeof(size_t) * 7 - sizeof(bool) * 8 - sizeof(int) * 12];
     };
 
     alignas(CACHE_LINE_SIZE * 2) constexpr serverConfig server_config;
 
-    //Put every single html/css/js
+    //Put every single file route in here
     //always include a slash before the file type i.e. /pdf, /img, /jpeg
     inline std::string server_dir = "/Users/trangtran/Desktop/coding_files/a/Networking/Servers";
-    //file routes doesn't update, requires a restart to update
+    //file routes doesn't update, requires a restart/recompilation to update
+    //future editors: html -> custom routes, other file types -> route relative to server_dir, use the configured routes as examples
     inline std::vector<std::pair<std::string, std::string>> file_routes_list = {
         //HTML
         {"/", server_dir + "/html/index.html"},
@@ -253,8 +263,25 @@ namespace HDE {
         {"/js/path/random.js", server_dir + "/js/path/random.js"},
         {"/js/path/randoma.js", server_dir + "/js/path/randoma.js"},
         {"/js/path/resources.js", server_dir + "/js/path/resources.js"},
-        {"/js/path/game.js", server_dir + "/js/path/game.js"}
-        //OTHERS
+        {"/js/path/game.js", server_dir + "/js/path/game.js"},
+        //OTHER ROUTES BELOW
+        //
+        //(error pages), currently empty, but in the future implement a redirection to those pages instead.
+        {"/400", server_dir + "/html/http_err/err_400.html"},
+        {"/401", server_dir + "/html/http_err/err_401.html"},
+        {"/403", server_dir + "/html/http_err/err_403.html"},
+        {"/404", server_dir + "/html/http_err/err_404.html"},
+        {"/405", server_dir + "/html/http_err/err_405.html"},
+        {"/css/http_err/err_400.css", server_dir + "/css/http_err/err_400.css"},
+        {"/css/http_err/err_401.css", server_dir + "/css/http_err/err_401.css"},
+        {"/css/http_err/err_403.css", server_dir + "/css/http_err/err_403.css"},
+        {"/css/http_err/err_404.css", server_dir + "/css/http_err/err_404.css"},
+        {"/css/http_err/err_405.css", server_dir + "/css/http_err/err_405.css"},
+        {"/js/htp_err/err_400.css", server_dir + "/js/http_err/err_400.js"},
+        {"/js/htp_err/err_401.css", server_dir + "/js/http_err/err_401.js"},
+        {"/js/htp_err/err_403.css", server_dir + "/js/http_err/err_403.js"},
+        {"/js/htp_err/err_404.css", server_dir + "/js/http_err/err_404.js"},
+        {"/js/htp_err/err_405.css", server_dir + "/js/http_err/err_405.js"}
     };
 
     //DO NOT DELETE OR UNCOMMENT ANY OF THE COMMENTS THEY'RE THERE FOR A REASON
@@ -325,7 +352,7 @@ namespace HDE {
     struct AdminConfig {
         std::string_view admin_password = "lamtran1234";
         bool admin_enabled = true;
-        const std::string admin_path_prefix = "/admin";
+        //const std::string admin_path_prefix = "/admin";
     };
 
     inline AdminConfig admin_config;
