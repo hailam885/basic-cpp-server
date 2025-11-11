@@ -1,0 +1,9 @@
+#files ignored
+Networking/Servers/kernel_variables.txt
+Networking/Servers/log.txt
+Networking/Servers/main
+Networking/Servers/catastrophic_bugs/compilation-err-29-10-2025.txt
+Networking/Servers/catastrophic_bugs/heap-use-after-free.txt
+Networking/Servers/catastrophic_bugs/log-stream-10-11-2025.txt
+Networking/Servers/catastrophic_bugs/runtime-err-10-11-2025.txt
+Networking/Servers/main.dSYM
