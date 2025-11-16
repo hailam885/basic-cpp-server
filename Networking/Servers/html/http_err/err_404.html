@@ -1,13 +1,22 @@
 <!DOCTYPE html>
-<html>
-    <head>
-        <title>404 Error</title>
-        <link rel="stylesheet" href="../../css/http_err/err_404.css"/>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    </head>
-    <body>
-        <!--Code here-->
-        <script src="../../js/http_err/err_404.js"></script>
-    </body>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Not Found</title>
+    <link rel="stylesheet" href="../../css/http_err/err_404.css">
+</head>
+<body>
+    <div class="error-container">
+        <div class="icon">🔍</div>
+        <div class="error-code">404</div>
+        <h1 class="error-title">Not Found</h1>
+        <p class="error-description">
+            Oops! The page you're trying to access is not found. It may have been moved or deleted.
+        </p>
+        <button class="home-button" onclick="goHome()">Go to Homepage</button>
+    </div>
+
+    <script src="../../js/http_err/err_404.js"></script>
+</body>
 </html>

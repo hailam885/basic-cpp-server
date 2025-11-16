@@ -2,10 +2,12 @@
 using namespace metal;
 
 struct GPUParsedRequest {
-    unsigned int method;        // 0=GET, 1=POST, 2=PUT, 3=HEAD, 4=UNKNOWN
-    unsigned int path_offset;   // Byte offset where path starts in request
-    unsigned int path_length;   // Length of path in bytes
-    unsigned int is_valid;      // 1=valid request line, 0=invalid
+    unsigned int method;         // 0=GET, 1=POST, 2=PUT, 3=HEAD, 4=INVALID
+    unsigned int path_offset;    // Byte offset where path starts in request
+    unsigned int path_length;    // Length of path in bytes
+    unsigned int version_valid;  // HTTP 1.0/1.1
+    //unsigned int content_length;
+    unsigned int is_valid;       // 1=valid request line, 0=invalid
 };
 
 /**
@@ -19,23 +21,23 @@ struct GPUParsedRequest {
  * @param gid - Global thread ID (which request this thread handles)
  */
 
+//
+
  //parameters: input buffer, output buffer, constant, thread id grid
 kernel void parse_http_requests(device const uchar* requests [[buffer(0)]], device GPUParsedRequest* results [[buffer(1)]], constant uint& max_request_size [[buffer(2)]], uint gid [[thread_position_in_grid]]) {
-    //request are laid our sequentially so just use y=mx+b
-    device const uchar* request = requests + (gid * max_request_size);
-    //initialize w/ invalid values
-    results[gid].method = 4;         // 4 = unknown
+    device const uchar* request = requests + (gid * max_request_size); //y = mx + b;
+    //assume invalid until proven valid
+    results[gid].method = 4;
     results[gid].path_offset = 0;
     results[gid].path_length = 0;
-    results[gid].is_valid = 0;       // assume invalid until proven valid
-    //checking HTTP method
-    if (request[0] == 'G' && request[1] == 'E' && request[2] == 'T' && request[3] == ' ') {
+    results[gid].is_valid = 0;
+    if (request[0] == 'G' && request[1] == 'E' && request[2] == 'T') {
         results[gid].method = 0;          // 0 = GET
         results[gid].path_offset = 4;     // Path starts after "GET "
     } else if (request[0] == 'P' && request[1] == 'O' && request[2] == 'S' && request[3] == 'T') {
         results[gid].method = 1;          // 1 = POST
         results[gid].path_offset = 5;     // Path starts after "POST "
-    } else if (request[0] == 'P' && request[1] == 'U' && request[2] == 'T' && request[3] == ' ') {
+    } else if (request[0] == 'P' && request[1] == 'U' && request[2] == 'T') {
         results[gid].method = 2;          // 2 = PUT
         results[gid].path_offset = 4;     // Path starts after "PUT "
     } else if (request[0] == 'H' && request[1] == 'E' && request[2] == 'A' && request[3] == 'D') {
@@ -68,6 +70,16 @@ kernel void parse_http_requests(device const uchar* requests [[buffer(0)]], devi
         }
     } else {
         results[gid].is_valid = 0; // No valid path found (path_end <= path_start)
+    }
+    //HTTP version validation
+    uint loc = results[gid].path_offset + results[gid].path_length + 1;
+    if ((request[loc] == 'H' && request[loc + 1] == 'T' && request[loc + 2] == 'T' && request[loc + 3] == 'P' && request[loc + 4] == '/' && request[loc + 5] == '1' && request[loc + 6] == '.' && request[loc + 7] == '1') || (request[loc] == 'H' && request[loc + 1] == 'T' && request[loc + 2] == 'T' && request[loc + 3] == 'P' && request[loc + 4] == '/' && request[loc + 5] == '1' && request[loc + 6] == '.' && request[loc + 7] == '0')) {
+        results[gid].version_valid = 1;
+    } else {
+        results[gid].version_valid = 0;
+        if (results[gid].is_valid == 1) {
+            results[gid].is_valid = 0;
+        }
     }
     // thread is done - result is written to global memory, metal automatically ensures writes are visible to CPU
 }

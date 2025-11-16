@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <errno.h>
 #include <execution>
 #include <filesystem>
 #include <fcntl.h>
@@ -50,6 +51,7 @@
 #include <quill/Logger.h>
 #include "quill/sinks/ConsoleSink.h"
 #include "quill/std/WideString.h"
+#include "quill/std/Chrono.h"
 #include <regex>
 #include <sched.h>
 #include <shared_mutex>
@@ -59,14 +61,17 @@
 #include <stdlib.h>
 #include <span>
 #include <sstream>
+#include <stdio.h>
 #include <string>
 #include <string.h>
 #include <string_view>
+#include <sys/event.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
@@ -97,6 +102,7 @@
 //to use alignas() specifier
 constexpr int returnNextBiggestPowerOfTwo(const int& num);
 
+//might need to optimize to string_view instead of string
 struct Request {
     alignas(CACHE_LINE_SIZE) int location = -1;
     std::string msg = "";
@@ -111,6 +117,7 @@ struct Request {
     Request() = default;
     Request(int dest, std::string_view message) : location(dest), msg(message) {};
     Request(int loc, const char* data, size_t len) : location(loc), msg(data, len) {};
+    ~Request() = default;
 };
 
 struct Response {
@@ -127,198 +134,10 @@ struct Response {
     Response() = default;
     Response(int dest, std::string_view message) : destination(dest), msg(message) {};
     Response(int dest, const char* data, size_t len) : destination(dest), msg(data, len) {};
-};
-
-template <typename T, size_t Capacity>
-class OptimizedQueue {
-    static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be power of 2");
-    //static_assert(sizeof(T) <= CACHE_LINE_SIZE, "T should fit in cache line");
-    private:
-        struct Slot { // can't use padding, request size is 30K+ bytes
-            std::atomic<uint64_t> sequence;
-            T data;
-            //char padding[CACHE_LINE_SIZE - sizeof(std::atomic<uint64_t>) - sizeof(T)];
-        };
-        /*alignas(M2_PAGE_SIZE)*/ Slot buffer[Capacity];
-        alignas(CACHE_LINE_SIZE) struct {
-            uint64_t enqueue_pos;
-            uint64_t cached_dequeue_pos;
-            uint64_t enqueue_count;  // Statistics
-            char padding[CACHE_LINE_SIZE - 3 * sizeof(uint64_t)];
-        } producer_cache;
-        // Consumer-only cache line (E-core or P-core reads here)
-        alignas(CACHE_LINE_SIZE) struct {
-            uint64_t dequeue_pos;
-            uint64_t cached_enqueue_pos;
-            uint64_t dequeue_count;  // Statistics
-            char padding[CACHE_LINE_SIZE - 3 * sizeof(uint64_t)];
-        } consumer_cache;
-        alignas(CACHE_LINE_SIZE) std::atomic<uint64_t> shared_enqueue_pos{0};
-        alignas(CACHE_LINE_SIZE) std::atomic<uint64_t> shared_dequeue_pos{0};
-        static constexpr uint64_t UPDATE_THRESHOLD = 64; //update shared position every N operations
-    public:
-        OptimizedQueue() {
-            for (size_t i = 0; i < Capacity; ++i) {
-                buffer[i].sequence.store(i, std::memory_order_relaxed);
-            }
-            producer_cache.enqueue_pos = 0;
-            producer_cache.cached_dequeue_pos = 0;
-            producer_cache.enqueue_count = 0;
-            consumer_cache.dequeue_pos = 0;
-            consumer_cache.cached_enqueue_pos = 0;
-            consumer_cache.dequeue_count = 0;
-            //touch all pages to prefault them (avoid page faults in fast path)
-            for (size_t i = 0; i < Capacity; i += M2_PAGE_SIZE / sizeof(Slot)) {
-                buffer[i].sequence.load(std::memory_order_relaxed);
-            }
-        }
-        bool enqueue(T&& value) noexcept { //producer only
-            uint64_t pos = producer_cache.enqueue_pos;
-            Slot& slot = buffer[pos & (Capacity - 1)];
-            __builtin_prefetch((&buffer[(pos + 1) & (Capacity - 1)]), 1, 3);
-            uint64_t seq = slot.sequence.load(std::memory_order_acquire); // arm64 load-exclusive: atomic read with exclusive monitor
-            if (seq != pos) [[unlikely]] { // check if slot ready for writing
-                if (pos - producer_cache.cached_dequeue_pos >= Capacity) {
-                    producer_cache.cached_dequeue_pos = shared_dequeue_pos.load(std::memory_order_acquire);
-                    if (pos - producer_cache.cached_dequeue_pos >= Capacity) return false; // Queue is full
-                }
-                return false;
-            }
-            __builtin_prefetch(&slot, 1, 3);
-            slot.data = std::move(value);
-            slot.sequence.store(pos + 1, std::memory_order_release); // arm64 store-exclusive: atomic write with release semantics
-            producer_cache.enqueue_pos++;
-            producer_cache.enqueue_count++;
-            if ((producer_cache.enqueue_count & (UPDATE_THRESHOLD - 1)) == 0) [[unlikely]] shared_enqueue_pos.store(producer_cache.enqueue_pos, std::memory_order_release); // periodically update shared position (minimize cache coherence)
-            return true;
-        }
-        bool enqueue(const T& value) noexcept { // Overload for const reference
-            uint64_t pos = producer_cache.enqueue_pos;
-            Slot& slot = buffer[pos & (Capacity - 1)];
-            __builtin_prefetch((&buffer[(pos + 1) & (Capacity - 1)]), 1, 3);
-            uint64_t seq = slot.sequence.load(std::memory_order_acquire);
-            if (seq != pos) [[unlikely]] {
-                if (pos - producer_cache.cached_dequeue_pos >= Capacity) {
-                    producer_cache.cached_dequeue_pos = shared_dequeue_pos.load(std::memory_order_acquire);
-                    if (pos - producer_cache.cached_dequeue_pos >= Capacity) return false;
-                }
-                return false;
-            }
-            __builtin_prefetch(&slot, 1, 3);
-            slot.data = value;
-            slot.sequence.store(pos + 1, std::memory_order_release);
-            producer_cache.enqueue_pos++;
-            producer_cache.enqueue_count++;
-            if ((producer_cache.enqueue_count & (UPDATE_THRESHOLD - 1)) == 0) [[unlikely]] shared_enqueue_pos.store(producer_cache.enqueue_pos, std::memory_order_release);
-            return true;
-        }
-        bool dequeue(T& value) noexcept { //optimzed for P/E core
-            uint64_t pos = consumer_cache.dequeue_pos;
-            Slot& slot = buffer[pos & (Capacity - 1)];
-            __builtin_prefetch((&buffer[(pos + 1) & (Capacity - 1)]), 1, 3);
-            uint64_t seq = slot.sequence.load(std::memory_order_acquire);
-            if (seq != pos + 1) [[unlikely]] { //check if slot has data
-                if (pos >= consumer_cache.cached_enqueue_pos) {
-                    consumer_cache.cached_enqueue_pos = shared_enqueue_pos.load(std::memory_order_acquire);
-                    if (pos >= consumer_cache.cached_enqueue_pos) return false; //actual empty queue
-                }
-                return false;
-            }
-            value = std::move(slot.data);
-            slot.sequence.store(pos + Capacity, std::memory_order_release);
-            consumer_cache.dequeue_pos++;
-            consumer_cache.dequeue_count++;
-            //periodically update shared position
-            if ((consumer_cache.dequeue_count & (UPDATE_THRESHOLD - 1)) == 0) [[unlikely]] {
-                shared_dequeue_pos.store(consumer_cache.dequeue_pos, std::memory_order_release);
-            }
-            return true;
-        }
-        size_t enqueue_batch(T* values, size_t count) noexcept { //batch operations alternative
-            size_t enqueued = 0;
-            uint64_t pos = producer_cache.enqueue_pos;
-            size_t chunks = count / 4; //in chunks of 4
-            size_t i = 0;
-            for (size_t chunk = 0; chunk < chunks; chunk++) {
-                __builtin_prefetch((&buffer[(pos + i + 4) & (Capacity - 1)]), 1, 3); //prefecth 4 slots
-                for (size_t j = 0; j < 4; j++, i++) {
-                    Slot& slot = buffer[(pos + i) & (Capacity - 1)];
-                    uint64_t seq = slot.sequence.load(std::memory_order_acquire);
-                    if (seq != pos + i) goto batch_done;
-                    slot.data = std::move(values[i]);
-                    slot.sequence.store(pos + i + 1, std::memory_order_release);
-                    enqueued++;
-                }
-            }
-            for (; i < count; i++) { //for remaining items
-                Slot& slot = buffer[(pos + i) & (Capacity - 1)];
-                uint64_t seq = slot.sequence.load(std::memory_order_acquire);
-                if (seq != pos + i) break;
-                slot.data = std::move(values[i]);
-                slot.sequence.store(pos + i + 1, std::memory_order_release);
-                enqueued++;
-            }
-        batch_done:
-            producer_cache.enqueue_pos += enqueued;
-            producer_cache.enqueue_count += enqueued;
-            shared_enqueue_pos.store(producer_cache.enqueue_pos, std::memory_order_release); // Always update shared position after batch
-            return enqueued;
-        }
-        
-        size_t dequeue_batch(T* values, size_t count) noexcept {
-            size_t dequeued = 0;
-            uint64_t pos = consumer_cache.dequeue_pos;
-            size_t chunks = count / 4; //in chunks of 4
-            size_t i = 0;
-            for (size_t chunk = 0; chunk < chunks; chunk++) {
-                __builtin_prefetch((&buffer[(pos + i + 4) & (Capacity - 1)]), 1, 3);
-                for (size_t j = 0; j < 4; j++, i++) {
-                    Slot& slot = buffer[(pos + i) & (Capacity - 1)];
-                    uint64_t seq = slot.sequence.load(std::memory_order_acquire);
-                    if (seq != pos + i + 1) goto batch_done;
-                    values[i] = std::move(slot.data);
-                    slot.sequence.store(pos + i + Capacity, std::memory_order_release);
-                    dequeued++;
-                }
-            }
-            for (; i < count; i++) {
-                Slot& slot = buffer[(pos + i) & (Capacity - 1)];
-                uint64_t seq = slot.sequence.load(std::memory_order_acquire);
-                if (seq != pos + i + 1) break;
-                values[i] = std::move(slot.data);
-                slot.sequence.store(pos + i + Capacity, std::memory_order_release);
-                dequeued++;
-            }
-        batch_done:
-            consumer_cache.dequeue_pos += dequeued;
-            consumer_cache.dequeue_count += dequeued;
-            shared_dequeue_pos.store(consumer_cache.dequeue_pos, std::memory_order_release);
-            return dequeued;
-        }
-        // Check if empty (lock-free, wait-free)
-        bool empty() const noexcept {
-            uint64_t dequeue_pos = shared_dequeue_pos.load(std::memory_order_acquire);
-            uint64_t enqueue_pos = shared_enqueue_pos.load(std::memory_order_acquire);
-            return dequeue_pos >= enqueue_pos;
-        }
-        // Get approximate size
-        size_t size() const noexcept {
-            uint64_t dequeue_pos = shared_dequeue_pos.load(std::memory_order_acquire);
-            uint64_t enqueue_pos = shared_enqueue_pos.load(std::memory_order_acquire);
-            return enqueue_pos - dequeue_pos;
-        }
-        // Statistics
-        uint64_t get_enqueue_count() const noexcept {
-            return producer_cache.enqueue_count;
-        }
-        uint64_t get_dequeue_count() const noexcept {
-            return consumer_cache.dequeue_count;
-        }
+    ~Response() = default;
 };
 
 namespace HDE {
-    using AddressQueue = OptimizedQueue<Request, 8192>;
-    using ResponderQueue = OptimizedQueue<Response, 8192>;
     class SimpleServer {
         public:
             SimpleServer(int domain, int service, int protocol, int port, unsigned long interface, int bklg);
@@ -326,9 +145,9 @@ namespace HDE {
             ListeningSocket* get_socket();
         private:
             ListeningSocket* socket;
-            virtual void accepter(HDE::AddressQueue& address_queue, quill::Logger* logger) = 0;
-            virtual void handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue, quill::Logger* logger) = 0;
-            virtual void responder(HDE::ResponderQueue& response, quill::Logger* logger) = 0;
+            //void accepter(HDE::AddressQueue& address_queue, quill::Logger* logger);
+            //void handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue, quill::Logger* logger);
+            //void responder(HDE::ResponderQueue& response, quill::Logger* logger);
     };
 }
 

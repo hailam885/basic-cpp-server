@@ -84,8 +84,6 @@ struct ParsedRequest {
 template <typename T, size_t N>
 class WaitFreeQueue;
 
-//class GPUPacketProcessor;
-
 class M2ThreadAffinity {
 public:
     // M2 has 4 P-cores (0-3) and 4 E-cores (4-7)
@@ -113,15 +111,37 @@ public:
 };
 
 struct GPUParsedRequest {
-    unsigned int method; // 0=GET, 1=POST, 2=PUT, 3=DELETE, 4=HEAD, -1=INVALID
-    unsigned int path_offset;
-    unsigned int path_length;
-    unsigned int version_valid;
-    unsigned int content_length;
-    unsigned int is_valid;
+    unsigned int method;            // 0=GET, 1=POST, 2=PUT, 3=HEAD, 4=INVALID
+    unsigned int path_offset;       // Byte offset where path starts in request
+    unsigned int path_length;       // Length of path in bytes
+    unsigned int version_valid;     // HTTP 1.0/1.1
+    //unsigned int content_length;
+    unsigned int is_valid;          // 1=valid request line, 0=invalid
+};
+
+template <typename T, size_t Capacity>
+class OptimizedQueue;
+
+namespace arm64_atomics {
+    inline uint64_t fetch_add_explicit_llsc(uint64_t *ptr, uint64_t val);
+    inline uint64_t load_acquire(const uint64_t* ptr);
+    inline void store_release(uint64_t* ptr, uint64_t val);
+    inline uint64_t load_relaxed(const uint64_t* ptr);
+    inline void store_relaxed(uint64_t* ptr, uint64_t val);
+    inline bool compare_exchange_weak_acquire(uint64_t* ptr, uint64_t* expected, uint64_t desired);
+    inline void prefetch_read(const void* addr);
+    inline void prefetch_write(const void* addr);
+    inline void prefetch_stream_read(const void* addr);
+    inline void cpu_yield();
+    inline void arm_yield();
+    inline void isb();
+    inline void dmb();
+    inline void dmb_st();
+    inline void dmb_ld();
 };
 
 namespace HDE {
+
     //Only create an object is this enum ONCE
     enum logLevel : int {
         FULL = 3,
@@ -145,15 +165,14 @@ namespace HDE {
         private:
             std::unordered_map<std::string, std::string> cache;
             mutable std::shared_mutex cache_mutex;
-            std::string not_found_response;
             std::string public_root;
             std::vector<std::pair<std::string, std::string>> loaded_routes;
             inline static std::string_view get_content_type(std::string_view path) noexcept;
-            constexpr inline void create_404_response(); //loads into not_found_html & not_found_response
         public:
             inline void load_static_files(const std::vector<std::pair<std::string, std::string>>& routes, quill::Logger* logger);
             inline std::string_view get_response(std::string_view path) const noexcept;
-            inline std::optional<std::string> load_file_response(const std::string& file_path) const;
+            inline std::optional<std::string> load_file_response(const std::string& file_path, const bool include_header = true) const;
+            inline std::string read_file_getline(const std::string& file_path, const bool add_newline_char = false) const;
             inline bool reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger);
             inline size_t reload_all_files(quill::Logger* logger);
             inline void clear_cache();
@@ -178,7 +197,7 @@ namespace HDE {
 
     //in the future try to combine all configurations into a struct and pass into cpu for effective cache line usage.
 
-    struct alignas(CACHE_LINE_SIZE * 2) serverConfig {
+    struct alignas(CACHE_LINE_SIZE * 4) serverConfig {
         //All modified settings requires restart && recompilation, settings are hardcoded for performance.
 
         //              [ General ]
@@ -186,14 +205,13 @@ namespace HDE {
         int queueCount = 1000000; //                    queue before being accepted, recommended 100K+
         int PORT = 80; //                               port, default to 80 is the easiest to test
         int MAX_CONNECTIONS_PER_SECOND = 40; //         connections per seconds threshold before rejecting due to possible DoS
-        int MAX_ADDRESS_QUEUE_SIZE = -1; //             -1 disables the limit
-        int MAX_RESPONSES_QUEUE_SIZE = -1; //           -1 disables the limit
+        size_t MAX_ADDRESS_QUEUE_SIZE = 8192; //             -1 disables the limit
+        size_t MAX_RESPONSES_QUEUE_SIZE = 8192; //           -1 disables the limit
         const size_t MAX_BUFFER_SIZE = 30721; //        size in bytes, recommended to be 30K+ bytes
         enum logLevel log_level = FULL; //           FULL / DEFAULT / DECREASED / MINIMAL
         bool disable_logging = true; //                Fully disables logging besides the start up and config checking logs
         bool disable_warnings = false; //               Disables certain warnings
         int time_window_for_rps = 2; //                 Specifies the amount of time to count the requests to calculate instantaneous rps
-        int max_retries_when_send_fail = 3; //          How many times should responder() reattempt sending data before giving up
         //backlog count are in a/Networking/Sockets/ListeningSocket.hpp, change the variable "backlog"
 
         //              [ Performance ]
@@ -207,35 +225,52 @@ namespace HDE {
         int threadsForAccepter = 3; //                  minimum 1
         int threadsForResponder = 4; //                 minimum 1
         int totalUsedThreads = threadsForAccepter + 1 + threadsForResponder; //handler defaults to 1 thread for now
-        bool IO_SYNCHONIZATION = false; //              true / false                stability / performance
         int wait_before_notify_thread = 0; //           >>practically useless<<
         //int max_pos_file_size = 50; //                possible size of the largest file in MBs, useful for certain optimizations
+        bool IO_SYNCHONIZATION = false; //              true / false                stability / performance
+
+        //              [ Networking / Socket Options ]
+
+        bool reuse_address = true; //                   Enable local TCP connection reuse for performance
+        bool receive_buffer_size = true; //             Allow receiving buffer sizes, reducing packet discards
+        bool send_buffer_size = true; //                Allow sending buffer sizes
+        bool tcp_fast_open = true; //                   Enable TCP fast opening
+        bool tcp_nodelay = true; //                     true -> disable certain routing optimizations to improve latency
+        bool non_blocking_socket = true; //             [[DO NOT MODIFY THIS SETTING]]
+        bool no_sigpipe_server = true; //               Do not generate a SIGPIPE when error occurs
+        int max_retries_when_send_fail = 3; //          How many times should responder() reattempt sending data before giving up
 
         //              [ Security ]
 
         bool enable_DoS_protection = false; //          true / false, turns on rate limiting
+        bool enable_slowloris_protection = true; //     true / false, turns on protection against Slowloris attacks
 
         //              [ 3D-Accelerated Configs ]      All settings related to 3D-Accelerated Client Request Parsing
 
         bool enable_perf_timing_telemetry = true; //    Enables logging how long it takes to process batch (size + µs)
         bool optimize_for_bin_size = true; //           false -> High performance; true -> High executable compression ratio
+        bool allow_gpu_logging = true; //               Decide whether the GPU log information or error
         size_t num_command_queues = 4; //               Amount of parallel command queues for parallel encoding
         size_t num_command_buffer = 8; //               For command buffer pool
         size_t ring_size = 3; //                        Amount of buffering for buffer ring, leave as 3
         size_t batch_size = 256; //                     Amount of requests per batch to send data efficiently to GPU
         size_t heap_size = 512; //                      Size of heap in megabytes (MB)
-        size_t minimum_batch_size = 64; //              Higher -> high throughput, lower -> lower latency
+        size_t minimum_batch_size = 128; //             Higher -> high throughput, lower -> lower latency
         int math_mode = 0; //                           0 -> Fast/Unsafe; 1 -> Balanced; 2 -> Slow/Safe
 
         //              [ Debugging Only ]              HDE::logLevel::FULL in order to be useful
 
         bool show_parsed_gpu_req = true; //             .
-        bool log_resp_before_send = true; //            .
+        bool show_req = true; //                        .
+        bool log_resp_before_send = false; //            .
+        bool log_batch_size = true; //                  .
+        bool show_err_pages = false; //                  .
+        //
         
         //char padding[CACHE_LINE_SIZE * 2 - sizeof(size_t) * 7 - sizeof(bool) * 8 - sizeof(int) * 12];
     };
 
-    alignas(CACHE_LINE_SIZE * 2) constexpr serverConfig server_config;
+    alignas(CACHE_LINE_SIZE * 4) constexpr serverConfig server_config;
 
     //Put every single file route in here
     //always include a slash before the file type i.e. /pdf, /img, /jpeg
@@ -367,13 +402,16 @@ namespace HDE {
     //creating structs/objects
     alignas(CACHE_LINE_SIZE * 8) inline serverStatus serverState;
     alignas(CACHE_LINE_SIZE) inline ServerMetrics server_metrics;
+    inline ResponseCache cache;
     class M2GPUHTTPParser;
+
+    using AddressQueue = OptimizedQueue<Request, HDE::server_config.MAX_ADDRESS_QUEUE_SIZE>;
+    using ResponderQueue = OptimizedQueue<Response, HDE::server_config.MAX_RESPONSES_QUEUE_SIZE>;
 
     //Server-side declarations here, do not modify anything below this line
     extern std::unordered_map<std::string, RateLimiter> connection_history;
 
     //Utility functions
-    inline std::string_view get_current_time();
     inline void clean_server_shutdown(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue);
     inline void reportErrorMessage(quill::Logger* logger);
     inline bool is_rate_limited(const std::string_view client_ip);
@@ -383,12 +421,11 @@ namespace HDE {
     alignas(CACHE_LINE_SIZE) inline const size_t NUM_THREADS = std::thread::hardware_concurrency();
     class Server : public SimpleServer {
         private:
-            void accepter(HDE::AddressQueue& address_queue, quill::Logger* logger) override;
-            void handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue, quill::Logger* logger) override;
-            void responder(HDE::ResponderQueue& response, quill::Logger* logger) override;
+            void accepter(HDE::AddressQueue& address_queue, quill::Logger* logger);
+            void handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue& responder_queue, quill::Logger* logger);
+            void responder(HDE::ResponderQueue& response, quill::Logger* logger);
             //char buffer[buffer_size] = {0};
             //int new_socket;
-            ResponseCache cache;
         public:
             Server(quill::Logger* logger);
             void launch(quill::Logger* logger) override;

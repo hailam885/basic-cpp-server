@@ -1,13 +1,22 @@
 <!DOCTYPE html>
-<html>
-    <head>
-        <title>405 Error</title>
-        <link rel="stylesheet" href="../../css/http_err/err_405.css"/>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    </head>
-    <body>
-        <!--Code here-->
-        <script src="../../js/http_err/err_405.js"></script>
-    </body>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>405 - Method Not Allowed</title>
+    <link rel="stylesheet" href="../../css/http_err/err_405.css">
+</head>
+<body>
+    <div class="error-container">
+        <div class="icon">🔍</div>
+        <div class="error-code">405</div>
+        <h1 class="error-title">Method Not Allowed</h1>
+        <p class="error-description">
+            Oops! Your request contains an HTTP method that is not permitted or supported.
+        </p>
+        <button class="home-button" onclick="goHome()">Go to Homepage</button>
+    </div>
+
+    <script src="../../js/http_err/err_400.js"></script>
+</body>
 </html>

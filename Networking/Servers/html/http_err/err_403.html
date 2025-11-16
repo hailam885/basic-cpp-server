@@ -1,13 +1,22 @@
 <!DOCTYPE html>
-<html>
-    <head>
-        <title>403 Error</title>
-        <link rel="stylesheet" href="../../css/http_err/err_403.css"/>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    </head>
-    <body>
-        <!--Code here-->
-        <script src="../../js/http_err/err_403.js"></script>
-    </body>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>403 - Forbidden</title>
+    <link rel="stylesheet" href="../../css/http_err/err_403.css">
+</head>
+<body>
+    <div class="error-container">
+        <div class="icon">🔍</div>
+        <div class="error-code">403</div>
+        <h1 class="error-title">Forbidden</h1>
+        <p class="error-description">
+            Oops! The resource you're trying to access is restricted.
+        </p>
+        <button class="home-button" onclick="goHome()">Go to Homepage</button>
+    </div>
+
+    <script src="../../js/http_err/err_403.js"></script>
+</body>
 </html>

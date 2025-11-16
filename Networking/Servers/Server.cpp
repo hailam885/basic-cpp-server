@@ -3,6 +3,9 @@
 //If code is commented out do not question
 
 
+//sometimes code calls "call to consteval function ..." as an error but it's just IntelliSense acting up
+
+
 #define SERVER_CPP_IMPLEMENTATION
 #define NS_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION
@@ -15,12 +18,7 @@
 //Developed for C++23.
 /*
 Performance optimization goals:
-- aggresively use constexpr and consteval for possible compile-time calculations
-- use alignas to minimize cache line mises
-- use padding of unusual size for different variables residing in different lines.
-- use [[likely]] & [[unlikely]] to influence branch prediction on the most probable branch:
 - Protocol Buffers/FlatBuffers: use compact, binary serialization formats; ditch JSON/XML
-- use __builtin_prefetch() to prevent cache misses and __builtin_arm_yield() to efficiently pause exec
 - If possible, try ditch the standard malloc/new and try custom high-frequency allocations like object pooling or arena allocators
 - If possible, try using Profile-Guided Optimization (PGO); compiler looks at performance profile during runtime and perform runtime optimizations to the final binary
 (Obscure)
@@ -30,6 +28,9 @@ Performance optimization goals:
 - using a dedicated core to spin on a condition instead of using a blocking lock for extremely-low-latency situations
 - try batch data together and process them all at once
 - pass std::exeution::par as the first parameters of <algorithm> functions, C++17+ only.
+- User-Space Networking: expose applications directly to networking cards (bypass kernel) to lower latency
+
+might need to replace std::this_thread::yield() with either arm64_atomics::cpu_yield() or __builtin_arm_yield();
 */
 
 ///only use PGO near the end of production/near feature-complete
@@ -46,6 +47,9 @@ alignas(CACHE_LINE_SIZE) std::condition_variable finish_initialization;
 alignas(CACHE_LINE_SIZE) std::condition_variable addr_in_addr_queue;
 alignas(CACHE_LINE_SIZE) std::condition_variable resp_in_res_queue;
 
+//preload error code pages
+std::string bad_request_response, unauthorized_response, forbidden_response, not_found_response, method_not_allowed_response;
+
 //for future attempts:     [Thread <thread id>]: [<processing component, if possible>] [<message>]
 
 //Main code, do not modify
@@ -53,6 +57,131 @@ alignas(CACHE_LINE_SIZE) std::condition_variable resp_in_res_queue;
 HDE::Server::Server(quill::Logger* logger) : SimpleServer(AF_INET, SOCK_STREAM, 0, HDE::server_config.PORT, INADDR_ANY, HDE::server_config.queueCount) {
     HDE::Server::launch(logger);
 }
+
+//custom ARM64 assembly instructions
+//try to see if you can specify what registers you will be using in the clobber list
+//asm volatile(<asm in string> : <input> : <output> : <clobber-list>);
+namespace arm64_atomics {
+    inline uint64_t fetch_add_explicit_llsc(uint64_t* ptr, uint64_t val) {
+        uint64_t result, tmp;
+        uint32_t status;
+        asm volatile(
+            "1: ldaxr %[result], [%[ptr]]\n"
+            "add %[tmp], %[result], %[val]\n"
+            "stlxr %w[status], %[tmp], [%[ptr]]\n"
+            "cbnz %w[status], 1b\n"
+            : [result] "=&r" (result), [tmp] "=&r" (tmp), [status] "=&r" (status)
+            : [ptr] "r" (ptr), [val] "r" (val)
+            : "memory", "cc"
+        );
+        return result;
+    }
+    inline uint64_t load_acquire(const uint64_t* ptr) {
+        uint64_t result;
+        asm volatile(
+            "ldar %[result], [%[ptr]]"
+            : [result] "=r" (result)
+            : [ptr] "r" (ptr)
+            : "memory"
+        );
+        return result;
+    }
+    inline void store_release(uint64_t* ptr, uint64_t val) {
+        asm volatile(
+            "stlr %[val], [%[ptr]]"
+            :
+            : [ptr] "r" (ptr), [val] "r" (val)
+            : "memory"
+        );
+    }
+    inline uint64_t load_relaxed(const uint64_t* ptr) {
+        uint64_t result;
+        asm volatile(
+            "ldr %[result], [%[ptr]]"
+            : [result] "=r" (result)
+            : [ptr] "r" (ptr)
+            :
+        );
+        return result;
+    }
+    inline void store_relaxed(uint64_t* ptr, uint64_t val) {
+        asm volatile(
+            "str %[val], [%[ptr]]"
+            :
+            : [ptr] "r" (ptr), [val] "r" (val)
+            :
+        );
+    }
+    inline bool compare_exchange_weak_acquire(uint64_t* ptr, uint64_t* expected, uint64_t desired) {
+        uint64_t old_val;
+        uint32_t status;
+        asm volatile(
+            "ldaxr %[old], [%[ptr]]\n"
+            "cmp %[old], %[exp]\n"
+            "b.ne 2f\n"
+            "stxr %w[status], %[_new], [%[ptr]]\n"
+            "b 3f\n"
+            "clrex\n"
+            "mov %w[status], #1\n"
+            : [old] "=&r" (old_val), [status] "=&r" (status)
+            : [ptr] "r" (ptr), [exp] "r" (*expected), [_new] "r" (desired)
+            : "memory", "cc"
+        );
+        *expected = old_val;
+        return status == 0;
+    }
+    //read prefetch
+    inline void prefetch_read(const void* addr) {
+        asm volatile(
+            "prfm pldl1keep, [%[addr]]" //L1
+            :
+            : [addr] "r" (addr)
+            :
+        );
+    }
+    //write prefetch
+    inline void prefetch_write(const void* addr) {
+        asm volatile(
+            "prfm pstl1keep, [%[addr]]" //L1
+            :
+            : [addr] "r" (addr)
+            :
+        );
+    }
+    //prefetch streaming, low temporal locality, use only once
+    inline void prefetch_stream_read(const void* addr) {
+        asm volatile(
+            "prfm pldl1strm, [%[addr]]" //streaming hint
+            :
+            : [addr] "r" (addr)
+            :
+        );
+    }
+    //yield hint in asm instructions
+    inline void cpu_yield() {
+        asm volatile("yield" ::: "memory");
+    }
+    //yield hint but using built-in function
+    inline void arm_yield() {
+        __builtin_arm_yield();
+    }
+    //issue instruction synchronization barrier, ensures all previous instructions complete before continuing
+    inline void isb() {
+        asm volatile("isb" ::: "memory");
+    }
+    //data memory barrier - all memory accesses complete
+    inline void dmb() {
+        asm volatile("dmb ish" ::: "memory");  //inner shareable
+    }
+    //data memory barrier - only stores
+    inline void dmb_st() {
+        asm volatile("dmb ishst" ::: "memory");
+    }
+    // Data memory barrier - only loads
+    inline void dmb_ld() {
+        asm volatile("dmb ishld" ::: "memory");
+    }
+};
 
 //Utilities
 inline std::string_view HDE::get_thread_id_cached() {
@@ -153,7 +282,7 @@ inline std::unordered_map<std::string_view, std::string_view> HDE::HTTPParser::p
 }
 
 //query_string has to start with ?
-//does it work? prolly not
+//input example: "?a=a&b=b&c=c&d=d"
 inline void HDE::HTTPParser::parse_query_string(std::string_view query_string, ParsedRequest& request) {
     //parse the query string then put in ParsedRequest.query_str_parsed. do some error checking first
     //validating query string
@@ -202,21 +331,26 @@ std::string_view HDE::HTTPParser::parse_url_encoding(const std::string& input) {
     return ss.str();
 }
 
-inline std::optional<std::string> HDE::ResponseCache::load_file_response(const std::string& file_path) const {
+inline std::optional<std::string> HDE::ResponseCache::load_file_response(const std::string& file_path, const bool include_header) const {
     std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) [[unlikely]] return std::nullopt;
+    if (!file.is_open()) [[unlikely]] throw std::runtime_error(std::format("File isn't open for {} brodie", file_path));
     auto size = file.tellg();
     if (size <= 0) [[unlikely]] {
         file.close();
-        return std::nullopt;
+        throw std::runtime_error(std::format("Read position for {} is invalid brodie", file_path));
     }
     file.seekg(0);
     std::string content;
     content.resize(size);
     file.read(content.data(), size);
+    /*if (file_path == "/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html/http_err/err_400.html") {
+        file.read(content.data(), size);
+    } else {
+        file.read(content.data(), size);
+    }*/
     file.close();
     std::string_view content_type = HDE::ResponseCache::get_content_type(file_path);
-    return std::format(
+    if (include_header) return std::format(
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: {}\r\n"
         "Content-Length: {}\r\n"
@@ -227,52 +361,137 @@ inline std::optional<std::string> HDE::ResponseCache::load_file_response(const s
         "\r\n{}",
         content_type, static_cast<long long>(size), content
     );
+    else return content;
+}
+
+inline std::string HDE::ResponseCache::read_file_getline(const std::string& file_path, const bool add_newline_char) const {
+    std::ifstream file(file_path);
+    std::string res, line;
+    while (std::getline(file, line)) {
+        res += (line + (add_newline_char ? "\n" : ""));
+    }
+    file.close();
+    if (res.empty()) throw std::runtime_error(std::format("File {} might be empty or an error occured. Fuck you", file_path));
+    return res;
 }
 
 inline void HDE::ResponseCache::load_static_files(const std::vector<std::pair<std::string, std::string>>& routes, quill::Logger* logger) {
     std::shared_lock<std::shared_mutex> lock(cache_mutex);
     loaded_routes = routes;
     for (const auto& [url_path, file_path] : routes) {
-        auto response_opt = load_file_response(file_path);
+        auto response_opt = load_file_response(file_path, true); 
         if (!response_opt.has_value()) [[unlikely]] {
             LOG_ERROR(logger, "WARNING: Cannot load file: {} for URL: {}", file_path, url_path);
             continue;
-        } 
+        }
         cache[url_path] = std::move(response_opt.value());
-        LOG_INFO(logger, "Mapped: {} → {} ({} bytes)", url_path, file_path, cache[url_path].length());
+        LOG_INFO(logger, "[{:>8} bytes] Mapped {:>25} -> {}", cache[url_path].length(), url_path, file_path);
     }
-    create_404_response();
+    std::string temp_str = "";
+    std::optional<std::string> temp = HDE::cache.read_file_getline("/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html/http_err/err_400.html", false);
+    if (temp.has_value()) temp_str = temp.value();
+    else throw std::runtime_error("Error 400 page aren't loaded correctly. Fuck you");
+    bad_request_response = std::format(
+        "HTTP/1.1 400 Bad Request\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
+        "\r\n{}", temp_str.length(), temp_str
+    );
+    temp = HDE::cache.read_file_getline("/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html/http_err/err_401.html", false);
+    if (temp.has_value()) temp_str = temp.value();
+    else throw std::runtime_error("Error 401 page aren't loaded correctly. Fuck you");
+    unauthorized_response = std::format(
+        "HTTP/1.1 401 Unauthorized\r\n"
+        "WWW-Authenticate: Basic\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
+        "\r\n{}", temp_str.length(), temp_str
+    );
+    temp = HDE::cache.read_file_getline("/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html/http_err/err_403.html", false);
+    if (temp.has_value()) temp_str = temp.value();
+    else throw std::runtime_error("Error 403 page aren't loaded correctly. Fuck you");
+    forbidden_response = std::format(
+        "HTTP/1.1 403 Forbidden\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
+        "\r\n{}", temp_str.length(), temp_str
+    );
+    temp = HDE::cache.read_file_getline("/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html/http_err/err_404.html", false);
+    if (temp.has_value()) temp_str = temp.value();
+    else throw std::runtime_error("Error 404 page aren't loaded correctly. Fuck you");
+    not_found_response = std::format(
+        "HTTP/1.1 404 Not Found\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
+        "\r\n{}", temp_str.length(), temp_str
+    );
+    temp = HDE::cache.read_file_getline("/Users/trangtran/Desktop/coding_files/a/Networking/Servers/html/http_err/err_405.html", false);
+    if (temp.has_value()) temp_str = temp.value();
+    else throw std::runtime_error("Error 405 page aren't loaded correctly. Fuck you");
+    method_not_allowed_response = std::format(
+        "HTTP/1.1 405 Not Found\r\n"
+        "Content-Type: text/html\r\n"
+        "Allow: GET, POST, PUT, HEAD\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n"
+        "X-Content-Type-Options: nosniff\r\n"              // Prevent MIME sniffing
+        "X-Frame-Options: DENY\r\n"                        // Prevent clickjacking
+        "X-XSS-Protection: 1; mode=block\r\n"              // XSS protection
+        "Content-Security-Policy: default-src 'self'\r\n"  // CSP
+        "Strict-Transport-Security: max-age=31536000\r\n"  // Force HTTPS (if using TLS)
+        "\r\n{}", temp_str.length(), temp_str
+    );
+    LOG_DEBUG(logger, "[400]: {}", bad_request_response);
+    LOG_DEBUG(logger, "[401]: {}", unauthorized_response);
+    LOG_DEBUG(logger, "[403]: {}", forbidden_response);
+    LOG_DEBUG(logger, "[404]: {}", not_found_response);
+    LOG_DEBUG(logger, "[405]: {}", method_not_allowed_response);
     LOG_INFO(logger, "Loaded {} custom routes", cache.size());
 }
 
+//automatically returns not_found_response so no need to worry
 inline std::string_view HDE::ResponseCache::get_response(std::string_view path) const noexcept {
     std::shared_lock<std::shared_mutex> lock(cache_mutex);
-    // 1. Try exact path match first
     auto it = cache.find(std::string(path));
-    if (it != cache.end()) [[likely]] {
-        return it->second;
-    }
-    // 2. If path is "/", try "/index.html"
+    if (it != cache.end()) [[likely]] return it -> second; //try exact path match first
     __builtin_prefetch(&path, 0, 3);
-    if (path == "/") [[unlikely]] {
+    if (path == "/") [[unlikely]] { //if path is "/", try "/index.html"
         __builtin_prefetch(&cache, 0, 3);
         it = cache.find("/index.html");
-        if (it != cache.end()) {
-            return it->second;
-        }
+        if (it != cache.end()) return it -> second;
     }
-    // 3. If path is directory (ends with /), try appending "index.html"
     __builtin_prefetch(&path, 0, 3);
-    if (path.size() > 1 && path.back() == '/') [[unlikely]] {
+    if (path.size() > 1 && path.back() == '/') [[unlikely]] { //if path is directory (ends with /), try appending "index.html"
         std::string index_path = std::string(path) + "index.html";
         __builtin_prefetch(&cache, 0, 3);
         it = cache.find(index_path);
-        if (it != cache.end()) {
-            return it->second;
-        }
+        if (it != cache.end()) return it -> second;
     }
-    // 4. Return 404
-    return not_found_response;
+    return not_found_response; //404
 }
 //try to not use this function it is broken
 inline bool HDE::ResponseCache::reload_file(const std::string& path, const std::string& file_path, quill::Logger* logger) {
@@ -289,7 +508,7 @@ inline bool HDE::ResponseCache::reload_file(const std::string& path, const std::
     file.read(content.data(), size);
     file.close();
     std::string_view content_type = HDE::ResponseCache::get_content_type(file_path);
-    std::string response = std::format(
+    std::string&& response = std::format(
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: {}\r\n"
         "Content-Length: {}\r\n"
@@ -328,20 +547,7 @@ inline std::string_view HDE::ResponseCache::get_content_type(std::string_view pa
     return "application/octet-stream";
 }
 
-constexpr inline void HDE::ResponseCache::create_404_response() {
-    //add a cleaner page for ts with a back to homepage button
-    std::string not_found_html = 
-        "<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested resource does not exist.</p></body></html>";
-    not_found_response = std::format(
-        "HTTP/1.1 404 Not Found\r\n"
-        "Content-Type: text/html; charset=utf-8\r\n"
-        "Content-Length: {}\r\n"
-        "Connection: close\r\n"
-        "\r\n{}",
-        not_found_html.length(), not_found_html
-    );
-}
-
+//do not use
 inline size_t HDE::ResponseCache::reload_all_files(quill::Logger* logger) {
     size_t count = 0;
     std::shared_lock<std::shared_mutex> lock(cache_mutex);
@@ -359,8 +565,8 @@ inline size_t HDE::ResponseCache::reload_all_files(quill::Logger* logger) {
 inline void HDE::ResponseCache::clear_cache() {
     std::shared_lock<std::shared_mutex> lock(cache_mutex);
     cache.clear();
-    create_404_response();
 }
+
 inline size_t HDE::ResponseCache::get_cache_size() const {
     std::shared_lock<std::shared_mutex> lock(cache_mutex);
     return cache.size();
@@ -616,7 +822,7 @@ inline HDE::ServerMetrics::CPUBreakdown HDE::ServerMetrics::get_cpu_breakdown() 
 #ifdef __APPLE__
     host_cpu_load_info_data_t cpu_info;
     mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
-    if (host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, (host_info_t)&cpu_info, &count) != KERN_SUCCESS) return breakdown;
+    if (host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, (host_info64_t)&cpu_info, &count) != KERN_SUCCESS) return breakdown;
     uint64_t user = cpu_info.cpu_ticks[CPU_STATE_USER] + cpu_info.cpu_ticks[CPU_STATE_NICE];
     uint64_t system = cpu_info.cpu_ticks[CPU_STATE_SYSTEM];
     uint64_t idle = cpu_info.cpu_ticks[CPU_STATE_IDLE];
@@ -860,6 +1066,7 @@ inline bool HDE::HTTPValidator::is_valid_query_string(std::string_view query_str
 namespace HDE {
 //in the future try to upgrade to modern Metal 4 practices
 //also add telemetry/hardware stats to server control panel
+//add more request parsing in the gpu
 class M2GPUHTTPParser {
 private:
     MTL::Device* device;
@@ -897,6 +1104,7 @@ private:
         } else {
             options -> setMathMode(MTL::MathModeRelaxed);
         }
+        options -> setEnableLogging(HDE::server_config.allow_gpu_logging);
         options -> setOptimizationLevel(HDE::server_config.optimize_for_bin_size ? MTL::LibraryOptimizationLevelSize : MTL::LibraryOptimizationLevelDefault); //setting global optimization level for metal compiler
         MTL::Library* library = device -> newLibrary(source_str, options, &error);
         options -> release();  // Clean up compile options
@@ -937,8 +1145,8 @@ private:
             library -> release();
             throw std::runtime_error("Failed to create validate pipeline:\n" + error_msg);
         }
-        size_t parse_threads = parse_pipeline->maxTotalThreadsPerThreadgroup();
-        size_t validate_threads = validate_pipeline->maxTotalThreadsPerThreadgroup();
+        size_t parse_threads = parse_pipeline -> maxTotalThreadsPerThreadgroup();
+        size_t validate_threads = validate_pipeline -> maxTotalThreadsPerThreadgroup();
         LOG_INFO(logger, "Parse pipeline: max {} threads/threadgroup", parse_threads);
         LOG_INFO(logger, "Validate pipeline: max {} threads/threadgroup", validate_threads);
         validate_func -> release();
@@ -1048,17 +1256,17 @@ public:
         LOG_INFO(logger, "GPU Parser shutdown complete.");
     }
     //Thread-safe
-    void process_batch_async(const char** requests, size_t count, GPUParsedRequest* results, uint32_t* validations, std::function<void()> completion_handler) {
+    void process_batch_async(const char** requests, size_t count, GPUParsedRequest* results, uint32_t* validations, std::function<void(long req_count)> completion_handler) {
         if (count > batch_size)  [[unlikely]] {
             throw std::runtime_error("Batch size " + std::to_string(count) + " exceeds maximum " + std::to_string(batch_size));
         }
         if (count == 0) { //nothing to process
-            completion_handler();
+            completion_handler(count);
             return;
         }
         unsigned int max_size = static_cast<unsigned int>(max_request_size);
         if (HDE::server_config.log_level == FULL) {
-            LOG_DEBUG(logger, "[GPU] Processing batch of {} requests (async)", count);
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] Processing batch of {} requests (async)", HDE::get_thread_id_cached(), count);
         }
         size_t buffer_idx = get_next_buffer_index();
         __builtin_prefetch(&buffers, 0, 3);
@@ -1066,7 +1274,7 @@ public:
         MTL::Buffer* parsed_buffer = buffers.parsed_buffers[buffer_idx];
         MTL::Buffer* validation_buffer = buffers.validation_buffers[buffer_idx];
         if (HDE::server_config.log_level == FULL) {
-            LOG_DEBUG(logger, "[GPU] Using buffer slot {}", buffer_idx);
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] Using buffer slot {}", HDE::get_thread_id_cached(), buffer_idx);
         }
         __builtin_prefetch(request_buffer, 0, 3);
         char* gpu_memory = static_cast<char*>(request_buffer -> contents());
@@ -1080,7 +1288,7 @@ public:
         }
         request_buffer -> didModifyRange(NS::Range::Make(0, count * max_request_size)); //hint that buffer is modified
         if (HDE::server_config.log_level == FULL) {
-            LOG_DEBUG(logger, "[GPU] Copied {} requests to GPU memory", count);
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] Copied {} requests to GPU memory", HDE::get_thread_id_cached(), count);
         }
         MTL::CommandBuffer* cmd_buf = command_queue -> commandBuffer();
         if (!cmd_buf) [[unlikely]] throw std::runtime_error("Failed to create command buffer");
@@ -1103,14 +1311,14 @@ public:
         encoder -> setThreadgroupMemoryLength(8192, 0); //allocate thread group memory
         encoder -> dispatchThreads(grid_size, threadgroup_size);
         if (HDE::server_config.log_level == FULL) {
-            LOG_DEBUG(logger, "[GPU] Dispatched parse kernel: {} threads in groups of {}", count, threads_per_group);
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] Dispatched parse kernel: {} threads in groups of {}", HDE::get_thread_id_cached(), count, threads_per_group);
         }
         __builtin_prefetch(encoder, 0, 3);
         encoder -> setComputePipelineState(validate_pipeline);
         encoder -> setBuffer(request_buffer, 0, 0);      // [[buffer(0)]]
         encoder -> setBuffer(parsed_buffer, 0, 1);       // [[buffer(1)]]
         encoder -> setBuffer(validation_buffer, 0, 2);   // [[buffer(2)]]
-        encoder -> setBytes(&max_size, sizeof(uint32_t), 3);  // [[buffer(3)]]
+        encoder -> setBytes(&max_size, sizeof(unsigned int), 3);  // [[buffer(3)]]
         max_threads = validate_pipeline -> maxTotalThreadsPerThreadgroup();
         threads_per_group = std::min<size_t>(256, max_threads);
         if (threads_per_group == 0) threads_per_group = 32;
@@ -1118,35 +1326,40 @@ public:
         __builtin_prefetch(encoder, 0, 3);
         encoder -> dispatchThreads(grid_size, threadgroup_size);
         if (HDE::server_config.log_level == FULL) {
-            LOG_DEBUG(logger, "[GPU] Dispatched validate kernel");
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] Dispatched validate kernel", HDE::get_thread_id_cached());
         }
         encoder -> endEncoding();
         __builtin_prefetch(cmd_buf, 1, 3);
-        cmd_buf -> addCompletedHandler([&](MTL::CommandBuffer* completed_buffer) -> void {
+        cmd_buf -> addCompletedHandler([=, this](MTL::CommandBuffer* completed_buffer) -> void {
             MTL::CommandBufferStatus status = completed_buffer -> status();
             if (status == MTL::CommandBufferStatusError) [[unlikely]] {
                 NS::Error* cmd_error = completed_buffer -> error();
                 if (cmd_error) {
-                    LOG_ERROR(logger, "[GPU] Command buffer failed: {}", cmd_error -> localizedDescription() -> utf8String());
+                    LOG_ERROR(logger, "[Thread {}]: [GPU] Command buffer failed: {}", HDE::get_thread_id_cached(), cmd_error -> localizedDescription() -> utf8String());
                 } else {
-                    LOG_ERROR(logger, "[GPU] Command buffer failed with unknown error");
+                    LOG_ERROR(logger, "[Thread {}]: [GPU] Command buffer failed with unknown error", HDE::get_thread_id_cached());
                 }
-                completion_handler(); // Still call completion handler to avoid deadlock
+                completion_handler(count); // Still call completion handler to avoid deadlock
                 return;
             }
             //read results from memory
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] before retrieving parsed_buffer", HDE::get_thread_id_cached());
             GPUParsedRequest* gpu_results =  static_cast<GPUParsedRequest*>(parsed_buffer -> contents());
-            uint32_t* gpu_validations = static_cast<uint32_t*>(validation_buffer -> contents());
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] before retrieving validation buffer", HDE::get_thread_id_cached());
+            unsigned int* gpu_validations = static_cast<unsigned int*>(validation_buffer -> contents());
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] before memcpy() gpu_results", HDE::get_thread_id_cached());
             memcpy(results, gpu_results, count * sizeof(GPUParsedRequest));
-            memcpy(validations, gpu_validations, count * sizeof(uint32_t));
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] before memcpy() gpu_validations", HDE::get_thread_id_cached());
+            memcpy(validations, gpu_validations, count * sizeof(unsigned int));
             if (HDE::server_config.log_level == FULL) {
-                LOG_DEBUG(logger, "[GPU] Copied {} results from buffer slot {}", count, buffer_idx);
+                LOG_DEBUG(logger, "[Thread {}]: [GPU] Copied {} results from buffer slot {}", HDE::get_thread_id_cached(), count, buffer_idx);
             }
-            completion_handler();
+            completion_handler(count);
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] memcpy() successful and completion_handler() called.", HDE::get_thread_id_cached());
         });
         cmd_buf -> commit(); //submnit work to GPU
         if (HDE::server_config.log_level == FULL) {
-            LOG_DEBUG(logger, "[GPU] Command buffer submitted (async)");
+            LOG_DEBUG(logger, "[Thread {}]: [GPU] Command buffer submitted (async)", HDE::get_thread_id_cached());
         }
         //function ends here, completion handler will be called once GPU finishes
     }
@@ -1159,6 +1372,187 @@ public:
     };
 };
     inline std::unique_ptr<M2GPUHTTPParser> gpu_parser; 
+};
+
+//MPMC Lock Free Queue
+template <typename T, size_t Capacity>
+class OptimizedQueue {
+    private:
+        struct Slot {
+            uint64_t sequence;
+            alignas(T) std::byte storage[sizeof(T)];
+            Slot() : sequence(0) {}
+            T* data_ptr() noexcept {
+                return std::launder(reinterpret_cast<T*>(storage));
+            }
+        };
+        Slot* buffer;
+        alignas(CACHE_LINE_SIZE) uint64_t enqueue_pos;
+        char pad1[CACHE_LINE_SIZE - sizeof(uint64_t)];
+        alignas(CACHE_LINE_SIZE) uint64_t dequeue_pos;
+        char pad2[CACHE_LINE_SIZE - sizeof(uint64_t)];
+        const uint64_t index_mask;
+        uint64_t to_index(uint64_t pos) const noexcept {
+            return pos & index_mask;
+        }
+    public:
+        OptimizedQueue() : enqueue_pos(0), dequeue_pos(0), index_mask(Capacity - 1) {
+            buffer = static_cast<Slot*>(::operator new(Capacity * sizeof(Slot), std::align_val_t{CACHE_LINE_SIZE}));
+            for (size_t i = 0; i < Capacity; ++i) {
+                new (&buffer[i]) Slot();
+                arm64_atomics::store_relaxed(&buffer[i].sequence, i); //use relax store, single-threaded during init
+            }
+            for (size_t i = 0; i < Capacity; i += 16384 / sizeof(Slot)) {
+                arm64_atomics::prefetch_stream_read(&buffer[i]); //prefault pages with streaming hint (won't use again during init)
+            }
+            arm64_atomics::dmb(); //ensure all initialization is visible
+        }
+        ~OptimizedQueue() {
+            uint64_t deq_pos = arm64_atomics::load_relaxed(&dequeue_pos);
+            uint64_t enq_pos = arm64_atomics::load_relaxed(&enqueue_pos);
+            for (uint64_t i = 0; i < deq_pos; ++i) {
+                buffer[to_index(i)].data_ptr() -> ~T();
+            }
+            for (size_t i = 0; i < Capacity; ++i) {
+                buffer[i].~Slot();
+            }
+            ::operator delete(buffer, std::align_val_t{CACHE_LINE_SIZE});
+        }
+        OptimizedQueue(const OptimizedQueue&) = delete;
+        OptimizedQueue& operator=(const OptimizedQueue&) = delete;
+        bool enqueue(T&& value) noexcept(std::is_nothrow_move_constructible_v<T>) {
+            uint64_t pos = arm64_atomics::fetch_add_explicit_llsc(&enqueue_pos, 1);
+            uint64_t idx = to_index(pos);
+            Slot& slot = buffer[idx];
+            arm64_atomics::prefetch_write(&buffer[to_index(pos + 1)]);
+            arm64_atomics::prefetch_write(&buffer[to_index(pos + 2)]);
+            uint64_t seq;
+            uint32_t spin_count = 0;
+            for (;;) {
+                seq = arm64_atomics::load_acquire(&slot.sequence);
+                if (seq == pos) break;
+                if (seq < pos && pos - seq >= Capacity) {
+                    spin_count++;
+                    if (spin_count < 64) {
+                        arm64_atomics::cpu_yield();
+                    } else if (spin_count < 256) {
+                        for (int i = 0; i < 4; ++i) arm64_atomics::cpu_yield();
+                    } else {
+                        for (int i = 0; i < 16; ++i) arm64_atomics::cpu_yield();
+                        if (spin_count > 1000) spin_count = 256;
+                    }
+                    continue;
+                }
+                arm64_atomics::cpu_yield();
+            }
+            arm64_atomics::prefetch_write(&slot);
+            // Construct object
+            new (slot.data_ptr()) T(std::move(value));
+            // Release store to publish
+            arm64_atomics::store_release(&slot.sequence, pos + 1);
+            return true;
+        }
+        //overload for const refs
+        bool enqueue(const T& value) noexcept(std::is_nothrow_copy_constructible_v<T>) {
+            uint64_t pos = arm64_atomics::fetch_add_explicit_llsc(&enqueue_pos, 1);
+            uint64_t idx = to_index(pos);
+            Slot& slot = buffer[idx];
+            arm64_atomics::prefetch_write(&buffer[to_index(pos + 1)]);
+            arm64_atomics::prefetch_write(&buffer[to_index(pos + 2)]);
+            uint64_t seq;
+            for (;;) {
+                seq = arm64_atomics::load_acquire(&slot.sequence);
+                if (seq == pos) break;
+                if (seq < pos && pos - seq >= Capacity) {
+                    arm64_atomics::cpu_yield();
+                    continue;
+                }
+                arm64_atomics::cpu_yield();
+            }
+            arm64_atomics::prefetch_write(&slot);
+            new (slot.data_ptr()) T(value);
+            arm64_atomics::store_release(&slot.sequence, pos + 1);
+            return true;
+        }
+        bool dequeue(T& out_value) noexcept(std::is_nothrow_move_assignable_v<T>) {
+            uint64_t pos = arm64_atomics::fetch_add_explicit_llsc(&dequeue_pos, 1);
+            uint64_t idx = to_index(pos);
+            Slot& slot = buffer[idx];
+            arm64_atomics::prefetch_read(&buffer[to_index(pos + 1)]);
+            arm64_atomics::prefetch_read(&buffer[to_index(pos + 2)]);
+            uint64_t seq;
+            for (;;) {
+                seq = arm64_atomics::load_acquire(&slot.sequence);
+                if (seq == pos + 1) break;
+                if (seq < pos + 1 && pos + 1 - seq > Capacity) {
+                    arm64_atomics::cpu_yield();
+                    continue;
+                }
+                arm64_atomics::cpu_yield();
+            }
+            arm64_atomics::prefetch_read(&slot);
+            out_value = std::move(*slot.data_ptr());
+            slot.data_ptr() -> ~T();
+            arm64_atomics::store_release(&slot.sequence, pos + Capacity);
+            return true;
+        }
+        //batch operations, good for loop unrolling
+        size_t enqueue_batch(T* values, size_t count) noexcept {
+            if (count == 0) return 0;
+            // Claim positions atomically
+            uint64_t start_pos = arm64_atomics::fetch_add_explicit_llsc(&enqueue_pos, count);
+            size_t enqueued = 0;
+            // Manually unrolled loop - process 4 at a time
+            size_t i = 0;
+            for (; i + 3 < count; i += 4) {
+                //prefetch 4 slots ahead & process all 4
+                arm64_atomics::prefetch_write(&buffer[to_index(start_pos + i)]);
+                arm64_atomics::prefetch_write(&buffer[to_index(start_pos + i + 1)]);
+                arm64_atomics::prefetch_write(&buffer[to_index(start_pos + i + 2)]);
+                arm64_atomics::prefetch_write(&buffer[to_index(start_pos + i + 3)]);
+                for (int j = 0; j < 4; j++) {
+                    uint64_t pos = start_pos + i + j;
+                    Slot& slot = buffer[to_index(pos)];
+                    uint64_t seq;
+                    while ((seq = arm64_atomics::load_acquire(&slot.sequence)) != pos) {
+                        if (seq < pos && pos - seq >= Capacity) {
+                            goto batch_done;
+                        }
+                        arm64_atomics::cpu_yield();
+                    }
+                    new (slot.data_ptr()) T(std::move(values[i + j]));
+                    arm64_atomics::store_release(&slot.sequence, pos + 1);
+                    enqueued++;
+                }
+            }
+            // Handle remaining items
+            for (; i < count; i++) {
+                uint64_t pos = start_pos + i;
+                Slot& slot = buffer[to_index(pos)];
+                uint64_t seq;
+                while ((seq = arm64_atomics::load_acquire(&slot.sequence)) != pos) {
+                    if (seq < pos && pos - seq >= Capacity) goto batch_done;
+                    arm64_atomics::cpu_yield();
+                }
+                new (slot.data_ptr()) T(std::move(values[i]));
+                arm64_atomics::store_release(&slot.sequence, pos + 1);
+                enqueued++;
+            }
+        batch_done:
+            return enqueued;
+        }
+        bool empty() const noexcept {
+            // Use acquire loads to see latest state
+            uint64_t deq = arm64_atomics::load_acquire(&dequeue_pos);
+            uint64_t enq = arm64_atomics::load_acquire(&enqueue_pos);
+            return deq >= enq;
+        }
+        size_t size() const noexcept {
+            uint64_t deq = arm64_atomics::load_acquire(&dequeue_pos);
+            uint64_t enq = arm64_atomics::load_acquire(&enqueue_pos);
+            if (enq <= deq) return 0;
+            return (enq - deq < Capacity) ? (enq - deq) : Capacity;
+        }
 };
 
 //Runs on independent thread
@@ -1181,7 +1575,6 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
     thread_local ssize_t bytesRead;
     //thread_local struct sockaddr_in address;
     thread_local struct timeval timeout = {5, 0}; //wait 5 seconds for client to send a response, closes when unresponsive
-    //Epoll set up, good for batching requests then process at once, but it's only good for managing hundreds/thousands of concurrent connections.
     /*#ifdef __APPLE__
         int kq = kqueue();
         if (kq < 0) {
@@ -1247,9 +1640,10 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
         if (client_socket_fd < 0) [[unlikely]] {
             if (HDE::server_config.log_level != MINIMAL) LOG_ERROR(logger, "[Thread {}]: [Accepter] A client cannot connect to the server.", HDE::get_thread_id_cached());
             HDE::reportErrorMessage(logger);
+            client_socket_fd = 0;
             continue;
         }
-        if (setsockopt(client_socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) [[unlikely]] {
+        if (setsockopt(client_socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0 && HDE::server_config.enable_slowloris_protection) [[unlikely]] {
             if (HDE::server_config.log_level == FULL) {
                 LOG_ERROR(logger, "[Thread {}]: [Accepter] Failed to set socket timeout: {}", HDE::get_thread_id_cached(), strerror(errno));
             }
@@ -1258,7 +1652,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             LOG_DEBUG(logger, "[Thread {}]: [Accepter] Checkpoint 2 reached.", HDE::get_thread_id_cached());
         }
         __builtin_prefetch(&nodelay, 0, 3);
-        if (setsockopt(client_socket_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay)) < 0) [[unlikely]] { //send packets immediately when available config
+        if (setsockopt(client_socket_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay)) < 0 && HDE::server_config.tcp_nodelay) [[unlikely]] { //send packets immediately when available, reduces latency
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 LOG_NOTICE(logger, "[Thread {}]: [Accepter] Failed to set TCP_NODELAY", HDE::get_thread_id_cached());
             }
@@ -1306,7 +1700,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             }
             __builtin_prefetch(&local_buf, 0, 3);
             Request req(client_socket_fd, std::string(local_buf, bytesRead)); //optimize obj creation
-            while (!address_queue.enqueue(std::move(req))) __builtin_arm_yield(); //arm64 yield instruction
+            while (!address_queue.enqueue(std::move(req))) std::this_thread::yield(); //arm64 yield instruction
             HDE::server_metrics.add_to_bytes_received(bytesRead);
             if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
                 __builtin_prefetch(&local_buf, 0, 3);
@@ -1359,6 +1753,7 @@ void HDE::Server::accepter(HDE::AddressQueue& address_queue, quill::Logger* logg
             __builtin_prefetch(&connection_history, 1, 3);
             connection_history.clear();
         }
+        client_socket_fd = 0;
     }
     /*#ifdef __APPLE__
         close(kq);
@@ -1393,31 +1788,8 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
     thread_local const char* request_ptrs[BATCH_SIZE];
     thread_local GPUParsedRequest parsed_results[BATCH_SIZE];
     thread_local size_t batch_count = 0;
-    thread_local std::atomic<bool> gpu_busy{false};
-    //in the future add some special pages specifically for these
-    thread_local static const std::string_view bad_request_response = cache.get_response("/400");
-    thread_local static const std::string_view forbidden_response = 
-        "HTTP/1.1 403 Forbidden\r\n"
-        "Content-Type: text/plain\r\n"
-        "Content-Length: 9\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "Forbidden";
-    thread_local static const std::string_view method_not_allowed_response = 
-        "HTTP/1.1 405 Method Not Allowed\r\n"
-        "Content-Type: text/plain\r\n"
-        "Content-Length: 18\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "Method Not Allowed";
-    thread_local static const std::string_view unauthorized_response = 
-        "HTTP/1.1 401 Unauthorized\r\n"
-        "Content-Type: text/plain\r\n"
-        "WWW-Authenticate: Basic realm=\"Admin Area\"\r\n"
-        "Content-Length: 12\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "Unauthorized";
+    //actually can optimize gpu_busy to use memory_order_acquire instead of seq_cst
+    volatile std::atomic<bool> gpu_busy{false};
     thread_local std::chrono::steady_clock::time_point gpu_start;
     thread_local std::chrono::steady_clock::time_point gpu_end;
     thread_local std::chrono::microseconds gpu_time;
@@ -1436,22 +1808,22 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
         }
         batch_count = 0;
         while (batch_count < BATCH_SIZE) {
-            __builtin_prefetch(&address_queue, 1, 3);
             while (!address_queue.dequeue(batch[batch_count])) __builtin_arm_yield();
-            if (!address_queue.dequeue(batch[batch_count])) {
+            /*if (!address_queue.dequeue(batch[batch_count])) { //wth is this
                 if (batch_count > 0) break;  // Have some, process them
                 //__builtin_arm_yield();
                 continue;
-            }
-            __builtin_prefetch(&batch, 0, 3);
+            }*/
             if (batch[batch_count].location == 0) [[unlikely]] continue;
-            __builtin_prefetch(request_ptrs, 1, 3);
             request_ptrs[batch_count] = batch[batch_count].msg.c_str();
             batch_count++;
-            if (gpu_busy.load(std::memory_order_acquire)) {
-                if (batch_count > HDE::server_config.minimum_batch_size) break;
+            if (!gpu_busy.load(std::memory_order_seq_cst)) {
+                if (batch_count >= HDE::server_config.minimum_batch_size) break;
             }
-            if (batch_count >= 128 && address_queue.size() < 10) break; //don't want for full queue if batch draining
+            //refactor this if's part
+            if (batch_count == BATCH_SIZE - 1) break; //max batch size, too much, have to break to prevent exception
+            if (batch_count < HDE::server_config.minimum_batch_size) break;
+            if (address_queue.size() < 256) break; //queue could be refilling same rate as polling, quit to same sum latency
         }
         if (batch_count == 0) continue;
         if (HDE::server_config.enable_perf_timing_telemetry) {
@@ -1459,28 +1831,39 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
             gpu_start = std::chrono::high_resolution_clock::now();
         }
         if (HDE::server_config.log_level != MINIMAL || HDE::server_config.log_level != DECREASED) {
-            LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] A valid batch has formed. Processing...", HDE::get_thread_id_cached());
+            LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] A valid batch of {} requests has formed. Processing...", HDE::get_thread_id_cached(), batch_count);
         }
-        while (gpu_busy.load(std::memory_order_acquire)) __builtin_arm_yield(); // Wait for GPU to finish current batch
+        while (gpu_busy.load(std::memory_order_acquire)) std::this_thread::yield(); // Wait for GPU to finish current batch
         gpu_busy.store(true, std::memory_order_release);
         __builtin_prefetch(&gpu_parser, 0, 3);
-        gpu_parser -> process_batch_async(request_ptrs, batch_count, parsed_results, validation_results, [&]() -> void {
+        gpu_parser -> process_batch_async(request_ptrs, batch_count, parsed_results, validation_results, [&](long int req_count) -> void {
+            if (req_count < 0) [[unlikely]] {
+                LOG_ERROR(logger, "[Thread {}]: [GPU-Accelerated Handler] Invalid argument req_count for lambda [&](int req_count) -> void", HDE::get_thread_id_cached());
+            }
+            LOG_DEBUG(logger, "here");
             if (HDE::server_config.enable_perf_timing_telemetry) {
                 __builtin_prefetch(&gpu_end, 1, 3);
                 gpu_end = std::chrono::high_resolution_clock::now();
                 __builtin_prefetch(&gpu_time, 1, 3);
                 gpu_time = std::chrono::duration_cast<std::chrono::microseconds>(gpu_end - gpu_start);
                 if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
-                    LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] Processed {} requests in {}µs (GPU)", HDE::get_thread_id_cached(), batch_count, gpu_time.count());
+                    LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] Processed {} requests in {} microseconds (GPU)", HDE::get_thread_id_cached(), req_count, gpu_time.count());
                 }
             }
             gpu_busy.store(false, std::memory_order_release);
+            if (HDE::server_config.log_level == FULL) {
+                LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler]: [completion handler] gpu_busy: {}", HDE::get_thread_id_cached(), gpu_busy.load(std::memory_order_seq_cst));
+            }
         });
-        //while (gpu_busy.load(std::memory_order_acquire)) __builtin_arm_yield();
+        while (gpu_busy.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
         if (HDE::server_config.log_level == FULL) {
             LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] Batch finished. Now post-processing", HDE::get_thread_id_cached());
         }
         //Post-Processing
+        LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler] (2) batch_count: {}", HDE::get_thread_id_cached(), batch_count);
+        #pragma clang loop vectorize(disable)
         for (size_t i = 0; i < batch_count; i++) {
             const GPUParsedRequest& parsed = parsed_results[i];
             __builtin_prefetch(&is_valid, 1, 3);
@@ -1491,7 +1874,7 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
                 LOG_DEBUG(logger, "[Thread{}]: [GPU-Accelerated Handler] parsed.path_offset: {}", HDE::get_thread_id_cached(), parsed.path_offset);
                 LOG_DEBUG(logger, "[Thread{}]: [GPU-Accelerated Handler] parsed.path_length: {}", HDE::get_thread_id_cached(), parsed.path_length);
                 LOG_DEBUG(logger, "[Thread{}]: [GPU-Accelerated Handler] parsed.version_valid: {}", HDE::get_thread_id_cached(), parsed.version_valid);
-                LOG_DEBUG(logger, "[Thread{}]: [GPU-Accelerated Handler] parsed.content_length: {}", HDE::get_thread_id_cached(), parsed.content_length);
+                //LOG_DEBUG(logger, "[Thread{}]: [GPU-Accelerated Handler] parsed.content_length: {}", HDE::get_thread_id_cached(), parsed.content_length);
                 LOG_DEBUG(logger, "[Thread{}]: [GPU-Accelerated Handler] parsed.is_valid: {}", HDE::get_thread_id_cached(), parsed.is_valid);
             }
             if (!parsed.is_valid || !is_valid) [[unlikely]] { //bad request
@@ -1499,9 +1882,15 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
                 __builtin_prefetch(&resp, 1, 3);
                 resp = {batch[i].location, bad_request_response};
                 while (!responder_queue.enqueue(std::move(resp))) __builtin_arm_yield();
+                if (HDE::server_config.log_level == FULL && HDE::server_config.show_req) {
+                    LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler] resp (400) : {}, request enqueued.", HDE::get_thread_id_cached(), resp.msg);
+                }
                 __builtin_prefetch(&(batch[i].msg), 0, 2);
                 __builtin_prefetch(&HDE::server_metrics, 1, 3);
                 HDE::server_metrics.record_request(false, batch[i].msg.length(), bad_request_response.length());
+                if (HDE::server_config.log_level != MINIMAL) {
+                    LOG_NOTICE(logger, "[Thread {}]: [GPU-Accelerated Handler] A client's request is malformed. (400)", HDE::get_thread_id_cached());
+                }
                 continue;
             }
             if (parsed.method > 3) [[unlikely]] {  // method not allowed
@@ -1509,11 +1898,18 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
                 __builtin_prefetch(&resp, 1, 3);
                 resp = {batch[i].location, method_not_allowed_response};
                 while (!responder_queue.enqueue(std::move(resp))) __builtin_arm_yield();
+                if (HDE::server_config.log_level == FULL && HDE::server_config.show_req) {
+                    LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler] resp (405) : {}, request enqueued.", HDE::get_thread_id_cached(), resp.msg);
+                }
                 __builtin_prefetch(&(batch[i].msg), 0, 2);
                 __builtin_prefetch(&HDE::server_metrics, 1, 3);
                 HDE::server_metrics.record_request(false, batch[i].msg.length(), method_not_allowed_response.length());
+                if (HDE::server_config.log_level != MINIMAL) {
+                    LOG_NOTICE(logger, "[Thread {}]: [GPU-Accelerated Handler] A client's request contains an illegal method. (405)", HDE::get_thread_id_cached());
+                }
                 continue;
             }
+            //ya might need a 493 right here
             __builtin_prefetch(&batch, 0, 2);
             __builtin_prefetch(&parsed, 1, 2);
             __builtin_prefetch(&path, 1, 3);
@@ -1523,12 +1919,17 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
             if (path.starts_with("/admin")) [[unlikely]] {
                 auto headers = HDE::HTTPParser::parse_headers(batch[i].msg);
                 auto auth_it = headers.find("Authorization");
-                if (!admin_config.admin_enabled || (auth_it == headers.end() || !AdminAuth::check_auth(auth_it -> second))) {
-                    Response&& _resp = {batch[i].location, unauthorized_response};
-                    while (!responder_queue.enqueue(std::move(_resp)));
+                if (!admin_config.admin_enabled || (auth_it == headers.end() || !AdminAuth::check_auth(auth_it -> second))) { //401
+                    resp = {batch[i].location, unauthorized_response};
+                    while (!responder_queue.enqueue(std::move(resp))) arm64_atomics::cpu_yield();
+                    if (HDE::server_config.log_level == FULL && HDE::server_config.show_req) {
+                        LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler] resp (401) : {}, request enqueued.", HDE::get_thread_id_cached(), resp.msg);
+                    }
+                    __builtin_prefetch(&(batch[i].msg), 0, 2);
+                    __builtin_prefetch(&HDE::server_metrics, 1, 3);
                     HDE::server_metrics.record_request(false, batch[i].msg.length(), unauthorized_response.length());
                     if (HDE::server_config.log_level != MINIMAL) {
-                        LOG_NOTICE(logger, "[Thread {}]: [GPU-Accelerated Handler] A client tried to access the control panel but entered the wrong password.", HDE::get_thread_id_cached());
+                        LOG_NOTICE(logger, "[Thread {}]: [GPU-Accelerated Handler] A client is not authorized to access the admin panel. (401)", HDE::get_thread_id_cached());
                     }
                     continue;
                 }
@@ -1613,20 +2014,28 @@ void HDE::Server::handler(HDE::AddressQueue& address_queue, HDE::ResponderQueue&
                 __builtin_prefetch(&resp, 1, 3);
                 resp = {batch[i].location, response}; // building response
             }
+            if (HDE::server_config.log_level == FULL && HDE::server_config.show_req) {
+                LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler] response: {}", HDE::get_thread_id_cached(), response);
+            }
             if (HDE::server_config.log_level == FULL && HDE::server_config.log_resp_before_send) {
                 LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler] resp.destination: {}", HDE::get_thread_id_cached(), resp.destination);
                 LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler] resp.msg: {}", HDE::get_thread_id_cached(), resp.msg);
             }
-            while (!responder_queue.enqueue(std::move(resp))) __builtin_arm_yield(); //load into queue
-            is_404 = response.starts_with("HTTP/1.1 404");
+            while (!responder_queue.enqueue(std::move(resp))) std::this_thread::yield(); //load into queue
+            if (HDE::server_config.log_level == FULL) {
+                LOG_DEBUG(logger, "[Thread {}]: [GPU-Accelerated Handler] Response successfully added to queue.", HDE::get_thread_id_cached());
+            }
+            if (response.starts_with("HTTP/1.1 404") && HDE::server_config.log_level != MINIMAL) {
+                LOG_NOTICE(logger, "[Thread {}]: [GPU-Accelerated Handler] A client tried to access non-existent resources. (404)", HDE::get_thread_id_cached());
+            }
             __builtin_prefetch(&batch, 0, 2);
             __builtin_prefetch(&HDE::server_metrics, 1, 3);
-            HDE::server_metrics.record_request(!is_404, batch[i].msg.length(), response.length());
+            HDE::server_metrics.record_request(!response.starts_with("HTTP/1.1 404"), batch[i].msg.length(), response.length());
         }
         if (HDE::server_config.log_level == FULL || HDE::server_config.log_level == DEFAULT) {
             LOG_INFO(logger, "[Thread {}]: [GPU-Accelerated Handler] Completed batch of {} requests", HDE::get_thread_id_cached(), batch_count);
         }
-        batch_count = 0; //reset for next batch
+        //batch_count = 0; //reset for next batch
     }
     LOG_NOTICE(logger, "[Thread {}]: [GPU-Accelerated Handler] Handler loop terminated.", HDE::get_thread_id_cached());
     return;
@@ -1709,7 +2118,7 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
             LOG_NOTICE(logger, "[Thread {}]: [Responder] Terminating responder loop...", HDE::get_thread_id_cached());
             break;
         }
-        {
+        /*{
             if (HDE::server_config.log_level == FULL) LOG_DEBUG(logger, "[Thread {}]: [Responder] Acquired responder_cv_mutex", HDE::get_thread_id_cached());
             if (HDE::server_config.log_level != MINIMAL) LOG_NOTICE(logger, "[Thread {}]: [Responder] Waiting for tasks...", HDE::get_thread_id_cached());
             cv_lock.lock();
@@ -1717,12 +2126,12 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
                 return HDE::serverState.stop_server.load(std::memory_order_acquire) || !response.empty();
             });
             cv_lock.unlock();
-        }
+        }*/
         if (HDE::serverState.stop_server.load(std::memory_order_seq_cst)) [[unlikely]] continue;
-        __builtin_prefetch(&client, 1, 3);
+        //__builtin_prefetch(&client, 1, 3);
         while (!response.dequeue(client)) __builtin_arm_yield();
         if (HDE::server_config.log_level == FULL) [[unlikely]] {
-            LOG_DEBUG(logger, "[Thread {}]: [Responder] Checkpoint 1 reached.", HDE::get_thread_id_cached());
+            LOG_DEBUG(logger, "[Thread {}]: [Responder] Information extracted from queue.", HDE::get_thread_id_cached());
         }
         if (client == Response{}) [[unlikely]] continue;
         __builtin_prefetch(msg, 1, 3);
@@ -1819,7 +2228,8 @@ void HDE::Server::responder(HDE::ResponderQueue& response, quill::Logger* logger
 
 void HDE::Server::launch(quill::Logger* logger) {
     //Checking server configurations during start up
-    //asm volatile("" ::: "memory"); //prevents the compiler from reordering memory operations, yes you can write asm inside c++
+    asm volatile("" ::: "memory"); //prevents the compiler from reordering memory operations, yes you can write asm inside c++
+    //asm volatile("");
     if (HDE::server_config.totalUsedThreads > HDE::NUM_THREADS && !HDE::server_config.disable_warnings) [[unlikely]] {
         LOG_WARNING(logger, "[Thread {}]: [Main Thread] WARNING: totalUsedThreads is more than the amount of threads in the system, 8. This may render other performance optimizations such as CPU core pinning useless", HDE::get_thread_id_cached(), HDE::server_config.totalUsedThreads, HDE::NUM_THREADS);
     } else if ((HDE::server_config.threadsForAccepter > HDE::NUM_THREADS - 1 || HDE::server_config.threadsForResponder > HDE::NUM_THREADS - 1) && !HDE::server_config.disable_warnings) [[unlikely]] {
@@ -1837,10 +2247,10 @@ void HDE::Server::launch(quill::Logger* logger) {
     } else if (HDE::server_config.MAX_CONNECTIONS_PER_SECOND < 1) {
         LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid MAX_CONNECTIONS_PER_SECOND configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::server_config.MAX_ADDRESS_QUEUE_SIZE < -1) {
+    } else if (HDE::server_config.MAX_ADDRESS_QUEUE_SIZE < 0) {
         LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid server_config.MAX_ADDRESS_QUEUE_SIZE configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
-    } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < -1) {
+    } else if (HDE::server_config.MAX_RESPONSES_QUEUE_SIZE < 0) {
         LOG_ERROR(logger, "[Thread {}]: [Main Thread] Invalid max_responses_queue_size configuration.", HDE::get_thread_id_cached());
         exit(EXIT_FAILURE);
     } else if (HDE::server_config.MAX_BUFFER_SIZE < 1) {
@@ -1878,13 +2288,15 @@ void HDE::Server::launch(quill::Logger* logger) {
     cache.load_static_files(file_routes_list, logger);
     //Configuring socket options
     int opt = 1;
-    setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
-    setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_RCVBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
-    setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_SNDBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
+    if (HDE::server_config.reuse_address) setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+    if (HDE::server_config.receive_buffer_size) setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_RCVBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
+    if (HDE::server_config.send_buffer_size) setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_SNDBUF, &HDE::server_config.MAX_BUFFER_SIZE, sizeof(HDE::server_config.MAX_BUFFER_SIZE));
     #ifdef __APPLE__
-        int tfo = 1;
-        setsockopt(get_socket() -> get_sock(), IPPROTO_TCP, TCP_FASTOPEN, &tfo, sizeof(tfo));
-        //setsockopt(get_socket() -> get_sock())
+        int flags = fcntl(get_socket() -> get_sock(), F_GETFL, 0) ;
+        if (HDE::server_config.tcp_fast_open) setsockopt(get_socket() -> get_sock(), IPPROTO_TCP, TCP_FASTOPEN, &opt, sizeof(opt));
+        //if (HDE::server_config.non_blocking_socket) fcntl(get_socket() -> get_sock(), F_SETFL, flags | O_NONBLOCK);
+        if (HDE::server_config.no_sigpipe_server) setsockopt(get_socket() -> get_sock(), SOL_SOCKET, SO_NOSIGPIPE, &opt, sizeof(opt));
+        //setsockopt(get_socket() -> get_sock(), IPPROTO_TCP, TCP)
     #endif
     std::ios_base::sync_with_stdio(HDE::server_config.IO_SYNCHONIZATION);
     HDE::AddressQueue address_queue;
@@ -1894,16 +2306,12 @@ void HDE::Server::launch(quill::Logger* logger) {
     for (size_t i = 0; i < HDE::server_config.threadsForAccepter; ++i) {
         processes[i] = std::jthread(&HDE::Server::accepter, this, std::ref(address_queue), logger);
     }
-    std::cout << "5" << std::endl;
     for (size_t i = 0; i < HDE::server_config.threadsForResponder; ++i) { //1 thread for handler
         processes[i + HDE::server_config.threadsForAccepter] = std::jthread(&HDE::Server::responder, this, std::ref(responder_queue), logger);
     }
-    std::cout << "6" << std::endl;
     processes[processes.size() - 1] = std::jthread(&HDE::Server::handler, this, std::ref(address_queue), std::ref(responder_queue), logger);
     LOG_INFO(logger, "[Thread {}]: [Main Thread] Threads initialized.", HDE::get_thread_id_cached());
-    std::cout << "7" << std::endl;
     HDE::serverState.finished_initialization.store(true, std::memory_order_release);
-    std::cout << "8" << std::endl;
     for (int i = 0; i < processes.size(); ++i) {
         finish_initialization.notify_all();
     }
